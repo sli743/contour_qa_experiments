@@ -79,9 +79,11 @@ def corrupt_batch(target: torch.Tensor, patient_ids: Sequence[str], cfg: Dict,
     for i in range(target.shape[0]):
         clean_i = target[i].detach()
         if train:
+            # Deterministic for a fixed seed/run, while changing by epoch, batch,
+            # and item. This makes experiments reproducible without repeating the
+            # same corruption every epoch.
             rng = random.Random(
                 base_seed + epoch * 1_000_003 + step * 1009 + i * 97
-                + random.randrange(1 << 20)
             )
         else:
             rng = random.Random(stable_seed(str(patient_ids[i]), base_seed))
@@ -189,8 +191,18 @@ def run_epoch(model, loader, optimizer, device, cfg, train: bool, epoch: int):
 
 def main():
     args = parse_args()
-    with open(args.config, "r", encoding="utf-8") as f:
+    config_path = Path(args.config).expanduser().resolve()
+    if not config_path.is_file():
+        raise FileNotFoundError(
+            f"Random-morphology training config not found: {config_path}"
+        )
+    with open(config_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
+    required = ["experiment_name", "output_root", "dino", "data",
+                "decoder", "random_morphology", "training", "loss"]
+    missing = [key for key in required if key not in cfg]
+    if missing:
+        raise KeyError(f"Missing required config sections: {missing}")
     seed_all(int(cfg.get("seed", 88)))
 
     experiment_dir = Path(cfg["output_root"]) / cfg["experiment_name"]
@@ -217,6 +229,9 @@ def main():
         config_name=cfg["dino"].get("config_name", "train/vit3d_highres"),
         decoder_channels=cfg["decoder"].get("channels", [256, 128, 64, 32]),
     ).to(device)
+
+    if any(parameter.requires_grad for parameter in model.encoder.parameters()):
+        raise RuntimeError("3DINO encoder must remain frozen for this experiment.")
 
     optimizer = torch.optim.AdamW(model.decoder.parameters(),
         lr=float(cfg["training"].get("learning_rate", 1e-4)),

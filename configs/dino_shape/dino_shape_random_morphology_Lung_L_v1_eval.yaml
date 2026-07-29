@@ -23,7 +23,7 @@ paths:
 evaluation:
   device: cuda:0
   num_workers: 2
-  spacing: [1.5, 1.5, 1.5]
+  spacing_zyx: [1.5, 1.5, 1.5]
   fov_name: Lung_L_1p5mm_nozoom
   output_root: /scratch/shaohan/contour_QA/dino_random_morphology/dino_shape_random_morphology_Lung_L_v1
   threshold: 0.5

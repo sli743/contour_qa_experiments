@@ -1,0 +1,34 @@
+Corrected/added files for the random-morphology frozen-3DINO experiment
+
+Moved into correct config directory:
+- configs/dino_shape/dino_shape_random_morphology_Lung_L_v1.yaml
+- configs/dino_shape/dino_shape_random_morphology_Lung_L_v1_eval.yaml
+
+Corrected:
+- training/train_dino_shape_random_morphology_decoder.py
+  * reproducible online corruption seeding
+  * explicit config existence/section validation
+  * runtime assertion that the 3DINO encoder is frozen
+- configs/dino_shape/dino_shape_random_morphology_Lung_L_v1_eval.yaml
+  * spacing key aligned with evaluator: spacing_zyx
+- scripts/dino_shape/run_dino_shape_random_morphology_full_pipeline_Lung_L_v1.sh
+  * checks both configs before starting
+  * passes train/eval configs explicitly
+  * clear three-stage execution messages
+
+Retained/validated:
+- training/random_morphology_corruptions.py
+- evaluation/probes/eval_dino_shape_random_morphology_probe_sweep.py
+- analysis/roc/summarize_three_dino_shape_models.py
+- scripts/dino_shape/run_dino_shape_random_morphology_Lung_L_v1.sh
+- scripts/dino_shape/run_dino_shape_random_morphology_probe_sweep_Lung_L_v1.sh
+- scripts/dino_shape/run_compare_dino_shape_three_models_roc_Lung_L.sh
+
+Documentation added:
+- RANDOM_MORPHOLOGY_EXPERIMENT.md
+
+Validation performed:
+- Python syntax compilation for training, corruption, evaluation, and ROC modules
+- Bash syntax checks for all new runners
+- Random-corruption smoke test on a synthetic 3D binary mask
+- Verification that both runner-referenced YAML files exist
