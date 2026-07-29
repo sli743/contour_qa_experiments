@@ -1,0 +1,9 @@
+Immediate repairs applied:
+- package __init__.py files
+- shared trained-DINO model loader and reconstruct() API
+- package-safe training import
+- repaired clean evaluator with Dice, HD95, ASSD, and volume difference
+- full DINO severity-sweep evaluator based on canonical ASSD probe script
+- Lung_L evaluation config referencing existing best_decoder.pth
+- clean/probe/analysis runner scripts
+- package-safe pilot visual evaluator import

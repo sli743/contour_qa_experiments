@@ -1,0 +1,71 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
+
+# Environments
+.env
+.venv/
+venv/
+env/
+conda-env/
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*~
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+nohup.out
+
+# Model checkpoints
+*.pth
+*.pt
+*.ckpt
+checkpoints/
+weights/
+pretrained/
+
+# Medical images and arrays
+*.nii
+*.nii.gz
+*.nrrd
+*.mha
+*.mhd
+*.dcm
+*.raw
+*.npy
+*.npz
+*.h5
+*.hdf5
+
+# Generated experiment outputs
+outputs/
+results/
+runs/
+wandb/
+tensorboard/
+probe_visualization_*/
+probe_eval_sweep*/
+roc_comparison/
+report/
+figures/
+
+# Archives
+*.zip
+*.tar
+*.tar.gz
+*.7z
+
+# Local data paths
+data/
+datasets/
+radformation-data/

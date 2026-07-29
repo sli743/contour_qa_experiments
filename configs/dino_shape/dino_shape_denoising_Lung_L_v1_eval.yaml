@@ -1,0 +1,31 @@
+experiment_name: dino_shape_denoising_Lung_L_v1
+output_root: /scratch/shaohan/contour_QA/dino_denoising
+seed: 88
+
+dino:
+  repo_path: /home/shaohan/3DINO
+  checkpoint_path: /home/shaohan/3DINO/pretrained/3dino_vit_weights.pth
+  config_name: train/vit3d_highres
+
+data:
+  roi_name: Lung_L
+
+  train_label_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/lungs_chest/Lung_L/training1/lungs_chest/Lung_L/labels
+  validation_label_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/lungs_chest/Lung_L/validation1/lungs_chest/Lung_L/labels
+  test_label_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/lungs_chest/Lung_L/testing1/lungs_chest/Lung_L/labels
+
+  test_ct_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/lungs_chest/Lung_L/testing1/lungs_chest/Lung_L/ct
+
+decoder:
+  channels: [256, 128, 64, 32]
+
+paths:
+  trained_decoder_checkpoint: /scratch/shaohan/contour_QA/dino_denoising/dino_shape_denoising_Lung_L_v1/checkpoints/best_decoder.pth
+
+evaluation:
+  device: cuda:0
+  num_workers: 2
+  spacing: [1.5, 1.5, 1.5]
+  fov_name: Lung_L_1p5mm_nozoom
+  output_root: /scratch/shaohan/contour_QA/dino_denoising/dino_shape_denoising_Lung_L_v1
+

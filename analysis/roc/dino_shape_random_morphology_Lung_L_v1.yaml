@@ -1,0 +1,55 @@
+experiment_name: dino_shape_random_morphology_Lung_L_v1
+output_root: /scratch/shaohan/contour_QA/dino_random_morphology
+seed: 88
+
+dino:
+  repo_path: /home/shaohan/3DINO
+  checkpoint_path: /home/shaohan/3DINO/pretrained/3dino_vit_weights.pth
+  config_name: train/vit3d_highres
+
+data:
+  roi_name: Lung_L
+  train_label_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/lungs_chest/Lung_L/training1/lungs_chest/Lung_L/labels
+  validation_label_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/lungs_chest/Lung_L/validation1/lungs_chest/Lung_L/labels
+  test_label_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/lungs_chest/Lung_L/testing1/lungs_chest/Lung_L/labels
+
+decoder:
+  channels: [256, 128, 64, 32]
+
+# Training-only corruption distribution. It intentionally excludes benchmark
+# half-space cuts and does not use fixed benchmark severity levels.
+random_morphology:
+  clean_probability: 0.20
+  morphology:
+    probability: 0.80
+    erosion_probability: 0.50
+    iterations: [1, 4]
+  translation:
+    probability: 0.50
+    voxels: [-3, 3]
+  local_ball:
+    probability: 0.40
+    bite_probability: 0.50
+    radius_voxels: [3, 10]
+
+training:
+  device: cuda:0
+  batch_size: 1
+  accumulation_steps: 4
+  num_workers: 2
+  num_epochs: 200
+  early_stopping_patience: 40
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  grad_clip: 1.0
+  precision: bf16
+
+loss:
+  global_dice_weight: 0.50
+  global_bce_weight: 0.10
+  changed_region_bce_weight: 0.40
+  changed_region_voxel_weight: 8.0
+  changed_region_dilation_voxels: 4
+
+evaluation:
+  threshold: 0.5

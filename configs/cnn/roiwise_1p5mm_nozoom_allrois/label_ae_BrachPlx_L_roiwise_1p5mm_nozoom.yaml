@@ -1,0 +1,107 @@
+save_dir: /scratch/shaohan/experiments/VariantVAE
+exp_name: label_ae_BrachPlx_L_roiwise_1p5mm_nozoom
+train: True
+valid: True
+test: True
+
+train_dir: ../radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/brachial/BrachPlx_L/training1/brachial/BrachPlx_L/labels
+valid_dir: ../radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/brachial/BrachPlx_L/validation1/brachial/BrachPlx_L/labels
+test_dir: ../radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/brachial/BrachPlx_L/testing1/brachial/BrachPlx_L/labels
+train_sample_ratio: 1.0
+
+proj_size: [160, 128, 96]
+proj_spacing: [1.5, 1.5, 1.5]
+proj_direction: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+save_volume: True
+
+manual_seed: 88
+resume: False
+resume_path: /scratch/shaohan/experiments/VariantVAE/label_ae_BrachPlx_L_roiwise_1p5mm_nozoom/checkpoints/
+use_tf32: False
+device: cuda:0
+
+init_lr: 1.0e-4
+batch_size: 4
+num_epochs: 400
+weight_decay: 1.0e-4
+recon_loss: dice_bce
+kld_weight: [1.0e-3]
+alpha: [0.8]
+weight_mode: uniform
+gamma: 2.0
+beta_cyc_annealing: False
+
+model: ae
+dim: 3
+residual_block: True
+blocks_per_level: 1
+in_ch: 1
+out_ch: 1
+train_label: True
+
+enc_chs: [16, 32, 64, 128]
+dec_chs: [128, 64, 32, 16]
+bottle_ch: null
+z_dim: 256
+
+normalization: Instance
+activation: LeakyRelu
+final_activation: Identity
+downsample: Stride2
+upsample: Stride2
+
+ckpt_enabled: True
+save_interval: 5
+save_best: True
+ckpt_file_load: final_weights.pth
+
+pre_processing:
+  normalize: False
+  MinMaxNormalize: False
+  clip: False
+  clip_percent: 0.5
+
+  train_augment: False
+  valid_augment: False
+  augment_prob: 0.0
+  zoom_prob: 0.0
+  zoom_min: 1.00
+  zoom_max: 1.00
+  rotate_prob: 0.0
+  translate_prob: 0.0
+  require_foreground: True
+
+  post_dae_train: False
+
+lr_scheduler:
+  type: no_decay
+  factor: 0.9
+  spe_arg: 10
+
+early_stopping:
+  type: loss_improve
+  patience: 30
+  min_epoch: 50
+  min_improve: 0.0001
+
+label_names:
+  0: Background
+  1: A_Aorta
+  2: A_Pulmonary
+  3: BrachPlx_L
+  4: BrachPlx_R
+  5: Bronchus
+  6: Carina
+  7: Esophagus
+  8: Heart
+  9: Liver
+  10: Lung_L
+  11: Lung_R
+  12: Ribs
+  13: SpinalCord
+  14: Stomach
+  15: Trachea
+  16: V_VenaCava_S
+  17: NS_Chestwall
+
+label_mask: [0, 3]
