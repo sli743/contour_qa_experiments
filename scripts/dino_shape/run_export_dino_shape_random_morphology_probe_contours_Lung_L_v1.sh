@@ -23,4 +23,6 @@ python -m evaluation.probes.export_dino_shape_denoising_probe_contours \
   --split "${SPLIT}" \
   --output_subdir "${OUTPUT_SUBDIR}" \
   --inference_batch_size "${BATCH_SIZE}" \
+  --layout patient \
+  --save_metrics \
   "$@"

@@ -14,11 +14,12 @@ Flat output structure (compatible with ProbeContourComparer.py):
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import random
 import shutil
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 import numpy as np
 import SimpleITK as sitk
@@ -26,7 +27,10 @@ import torch
 
 from evaluation.probes.eval_dino_shape_denoising_probe_sweep import (
     PREFERRED_PROBE_ORDER,
+    assd_binary,
+    dice_score_binary,
     extract_patient_id,
+    hd95_binary,
     get_eval_loader,
     load_config,
     make_corruption,
@@ -53,6 +57,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--voxel_levels", default="0,1,2,3,4,5")
     p.add_argument("--probe_types", nargs="*", default=PREFERRED_PROBE_ORDER)
     p.add_argument("--overwrite", action=argparse.BooleanOptionalAction, default=True)
+    p.add_argument("--layout", choices=["flat", "patient"], default="flat",
+                   help="flat keeps ProbeContourComparer compatibility; patient creates one folder per patient")
+    p.add_argument("--save_metrics", action=argparse.BooleanOptionalAction, default=False,
+                   help="save per-patient metrics.csv (recommended with --layout patient)")
     return p.parse_args()
 
 
@@ -155,13 +163,17 @@ def main() -> None:
             ref = sitk.ReadImage(str(source_path))
             print(f"[{selected_number}/{len(chosen)}] patient {patient_id}")
 
-            clean_path = out_dir / f"clean_input_patient_{patient_id}.nii.gz"
+            patient_dir = out_dir / f"patient_{patient_id}" if args.layout == "patient" else out_dir
+            patient_dir.mkdir(parents=True, exist_ok=True)
+            clean_name = "ground_truth.nii.gz" if args.layout == "patient" else f"clean_input_patient_{patient_id}.nii.gz"
+            clean_path = patient_dir / clean_name
             if should_write(clean_path, args.overwrite):
                 save_like(clean[0], ref, clean_path)
 
             ct_path = find_ct(cf, args.split, patient_id)
             if ct_path is not None:
-                dst = out_dir / f"original_ct_patient_{patient_id}.nii.gz"
+                ct_name = "ct.nii.gz" if args.layout == "patient" else f"original_ct_patient_{patient_id}.nii.gz"
+                dst = patient_dir / ct_name
                 if should_write(dst, args.overwrite):
                     shutil.copy2(ct_path, dst)
                 ct_exported += 1
@@ -204,16 +216,54 @@ def main() -> None:
                 for i, job in enumerate(chunk):
                     job["recon"] = recon[i:i+1]
 
+            metric_rows: List[Dict[str, object]] = []
+            spacing = tuple(float(v) for v in cf.get("evaluation", {}).get("spacing_zyx", [1.0, 1.0, 1.0]))
             for job in jobs:
                 if job["clean_equivalent"]:
                     job["recon"] = clean_recon
                 variant = probe_variant(job["probe_type"], job["level"])
-                corrupted_path = out_dir / f"corrupted_input_{variant}_patient_{patient_id}.nii.gz"
-                recon_path = out_dir / f"reconstruction_{variant}_patient_{patient_id}.nii.gz"
+                if args.layout == "patient":
+                    variant_dir = patient_dir / variant
+                    corrupted_path = variant_dir / "corrupted_input.nii.gz"
+                    recon_path = variant_dir / "reconstruction.nii.gz"
+                else:
+                    corrupted_path = out_dir / f"corrupted_input_{variant}_patient_{patient_id}.nii.gz"
+                    recon_path = out_dir / f"reconstruction_{variant}_patient_{patient_id}.nii.gz"
                 if should_write(corrupted_path, args.overwrite):
                     save_like(job["corrupted"][0], ref, corrupted_path)
                 if should_write(recon_path, args.overwrite):
                     save_like(job["recon"][0], ref, recon_path)
+
+                if args.save_metrics:
+                    corrupted = job["corrupted"]
+                    recon = job["recon"]
+                    dice_in = float(dice_score_binary(corrupted, clean)[0].item())
+                    dice_recon = float(dice_score_binary(recon, clean)[0].item())
+                    hd95_in = float(hd95_binary(corrupted, clean, spacing)[0].item())
+                    hd95_recon = float(hd95_binary(recon, clean, spacing)[0].item())
+                    assd_in = float(assd_binary(corrupted, clean, spacing)[0].item())
+                    assd_recon = float(assd_binary(recon, clean, spacing)[0].item())
+                    metric_rows.append({
+                        "patient_id": patient_id,
+                        "probe_type": job["probe_type"],
+                        "level": float(job["level"]),
+                        "dice_input_target": dice_in,
+                        "dice_recon_target": dice_recon,
+                        "dice_correction_gain": dice_recon - dice_in,
+                        "hd95_input_target": hd95_in,
+                        "hd95_recon_target": hd95_recon,
+                        "hd95_improvement": hd95_in - hd95_recon,
+                        "assd_input_target": assd_in,
+                        "assd_recon_target": assd_recon,
+                        "assd_improvement": assd_in - assd_recon,
+                    })
+
+            if args.save_metrics and metric_rows:
+                metrics_path = patient_dir / "metrics.csv" if args.layout == "patient" else out_dir / f"metrics_patient_{patient_id}.csv"
+                with metrics_path.open("w", newline="") as handle:
+                    writer = csv.DictWriter(handle, fieldnames=list(metric_rows[0].keys()))
+                    writer.writeheader()
+                    writer.writerows(metric_rows)
 
     print(f"Done. Use this directory in Probe Contour Comparer: {out_dir}")
     if ct_missing == 0:

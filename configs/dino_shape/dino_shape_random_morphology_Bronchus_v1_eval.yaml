@@ -1,0 +1,29 @@
+experiment_name: dino_shape_random_morphology_Bronchus_v1
+output_root: /scratch/shaohan/contour_QA/dino_random_morphology
+seed: 88
+
+dino:
+  repo_path: /home/shaohan/3DINO
+  checkpoint_path: /home/shaohan/3DINO/pretrained/3dino_vit_weights.pth
+  config_name: train/vit3d_highres
+
+data:
+  roi_name: Bronchus
+  train_label_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/airway/Bronchus/training1/airway/Bronchus/labels
+  validation_label_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/airway/Bronchus/validation1/airway/Bronchus/labels
+  test_label_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/airway/Bronchus/testing1/airway/Bronchus/labels
+  test_ct_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/airway/Bronchus/testing1/airway/Bronchus/ct
+
+decoder:
+  channels: [256, 128, 64, 32]
+
+paths:
+  trained_decoder_checkpoint: /scratch/shaohan/contour_QA/dino_random_morphology/dino_shape_random_morphology_Bronchus_v1/checkpoints/best_decoder.pth
+
+evaluation:
+  device: cuda:0
+  num_workers: 2
+  spacing_zyx: [1.5, 1.5, 1.5]
+  fov_name: Bronchus_1p5mm_nozoom
+  output_root: /scratch/shaohan/contour_QA/dino_random_morphology/dino_shape_random_morphology_Bronchus_v1
+  threshold: 0.5
