@@ -1,0 +1,31 @@
+experiment_name: dino_shape_pilot_Bronchus
+output_root: /scratch/shaohan/3DINO
+seed: 88
+
+paths:
+  trained_decoder_checkpoint: /scratch/shaohan/3DINO/dino_shape_pilot_Bronchus/checkpoints/best_decoder.pth
+
+dino:
+  repo_path: /home/shaohan/3DINO
+  checkpoint_path: /home/shaohan/3DINO/pretrained/3dino_vit_weights.pth
+  config_name: train/vit3d_highres
+
+data:
+  roi_name: Bronchus
+  train_label_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/airway/Bronchus/training1/airway/Bronchus/labels
+  validation_label_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/airway/Bronchus/validation1/airway/Bronchus/labels
+  test_label_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/airway/Bronchus/testing1/airway/Bronchus/labels
+  train_ct_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/airway/Bronchus/training1/airway/Bronchus/ct
+  validation_ct_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/airway/Bronchus/validation1/airway/Bronchus/ct
+  test_ct_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/airway/Bronchus/testing1/airway/Bronchus/ct
+
+decoder:
+  channels: [256, 128, 64, 32]
+
+evaluation:
+  threshold: 0.5
+  spacing_zyx: [1.5, 1.5, 1.5]
+  fov_name: Bronchus_roiwise_1p5mm_nozoom
+  device: cuda:0
+  num_workers: 2
+  output_root: /scratch/shaohan/contour_QA/dino_frozen/dino_shape_pilot_Bronchus

@@ -1,0 +1,68 @@
+experiment_name: dino_shape_denoising_Bronchus_v1
+output_root: /scratch/shaohan/contour_QA/dino_denoising
+seed: 88
+
+dino:
+  repo_path: /home/shaohan/3DINO
+  checkpoint_path: /home/shaohan/3DINO/pretrained/3dino_vit_weights.pth
+  config_name: train/vit3d_highres
+
+data:
+  roi_name: Bronchus
+  train_label_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/airway/Bronchus/training1/airway/Bronchus/labels
+  validation_label_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/airway/Bronchus/validation1/airway/Bronchus/labels
+  test_label_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/airway/Bronchus/testing1/airway/Bronchus/labels
+
+decoder:
+  channels: [256, 128, 64, 32]
+
+denoising:
+  clean_probability: 0.20
+  two_corruption_probability: 0.30
+  corruptions:
+    eroded:
+      weight: 0.15
+      voxels: [1, 5]
+    dilated:
+      weight: 0.15
+      voxels: [1, 5]
+    shifted:
+      weight: 0.10
+      voxels: [1, 5]
+    cut_upper_half:
+      weight: 0.10
+      fraction: [0.05, 0.35]
+    cut_lower_half:
+      weight: 0.10
+      fraction: [0.05, 0.35]
+    cut_posterior_half:
+      weight: 0.10
+      fraction: [0.05, 0.30]
+    big_bite:
+      weight: 0.15
+      fraction: [0.02, 0.20]
+    big_blob:
+      weight: 0.15
+      fraction: [0.02, 0.20]
+
+training:
+  device: cuda:0
+  batch_size: 1
+  accumulation_steps: 4
+  num_workers: 2
+  num_epochs: 200
+  early_stopping_patience: 40
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  grad_clip: 1.0
+  precision: bf16
+
+loss:
+  global_dice_weight: 0.50
+  global_bce_weight: 0.10
+  changed_region_bce_weight: 0.40
+  changed_region_voxel_weight: 8.0
+  changed_region_dilation_voxels: 4
+
+evaluation:
+  threshold: 0.5
