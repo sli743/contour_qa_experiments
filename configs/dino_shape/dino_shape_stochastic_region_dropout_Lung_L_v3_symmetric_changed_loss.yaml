@@ -1,0 +1,106 @@
+experiment_name: dino_shape_stochastic_region_dropout_Lung_L_v3_symmetric_changed_loss
+output_root: /scratch/shaohan/contour_QA/dino_stochastic_region_dropout
+seed: 91
+
+dino:
+  repo_path: /home/shaohan/3DINO
+  checkpoint_path: /home/shaohan/3DINO/pretrained/3dino_vit_weights.pth
+  config_name: train/vit3d_highres
+
+data:
+  roi_name: Lung_L
+  train_label_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/lungs_chest/Lung_L/training1/lungs_chest/Lung_L/labels
+  validation_label_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/lungs_chest/Lung_L/validation1/lungs_chest/Lung_L/labels
+  test_label_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/lungs_chest/Lung_L/testing1/lungs_chest/Lung_L/labels
+
+decoder:
+  channels: [256, 128, 64, 32]
+
+stochastic_region_dropout:
+  implementation_version: fast_v4_global_sdf_offset
+  spacing_zyx: [1.5, 1.5, 1.5]
+  clean_probability: 0.20
+  # Unconditional probabilities sum to 0.80; clean_probability supplies the other 0.20.
+  # v2 changes only the corruption mixture. Smooth warp remains 0.10.
+  branch_probabilities:
+    smooth_warp: 0.10
+    distance_noise: 0.20
+    combined: 0.15
+    stochastic_region_dropout: 0.20
+    global_boundary_offset: 0.15
+  smooth_warp:
+    control_grid_points_zyx:
+      min: [4, 4, 4]
+      max: [8, 8, 8]
+    gaussian_sigma_vox: [5.0, 12.0]
+    max_displacement_mm: [3.0, 12.0]
+    upsample_order: 1
+  distance_noise:
+    gaussian_sigma_vox: [4.0, 10.0]
+    amplitude_mm: [2.0, 10.0]
+    remove_small_components: true
+    min_component_voxels: 32
+    keep_largest_component: true
+  global_boundary_offset:
+    # Continuous signed-distance offset in physical units. This is deliberately
+    # not the benchmark's discrete erosion/dilation implementation.
+    magnitude_mm: [1.5, 6.0]
+    outward_probability: 0.50
+  dropout:
+    coarse_grid_points_zyx:
+      min: [4, 4, 4]
+      max: [8, 8, 8]
+    correlation_length_mm: [15.0, 45.0]
+    localization_sigma_mm: [20.0, 55.0]
+    random_field_weight: 1.0
+    localization_weight: 1.5
+    localization_cutoff_sigma: 3.5
+    upsample_order: 1
+    threshold_search_steps: 8
+    removed_fraction: [0.05, 0.35]
+    removed_fraction_tolerance: 0.08
+    min_max_depth_mm: 6.0
+    max_max_depth_mm: 55.0
+    max_remaining_components: 1
+    max_attempts: 8
+
+training:
+  device: cuda:0
+  batch_size: 1
+  accumulation_steps: 4
+  num_workers: 8
+  prefetch_factor: 2
+  validation_cache:
+    enabled: true
+  num_epochs: 200
+  early_stopping_patience: 40
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  grad_clip: 1.0
+  precision: bf16
+  timing:
+    enabled: true
+    sync_cuda: true
+    log_every_steps: 10
+
+loss:
+  global_dice_weight: 0.40
+  global_bce_weight: 0.10
+  # v3 ablation: remove the missing-foreground-only preference while
+  # preserving the total specialized-loss weight. All corruption settings
+  # are intentionally identical to v2.
+  changed_region_bce_weight: 0.50
+  missing_region_bce_weight: 0.00
+  changed_region_voxel_weight: 8.0
+  changed_region_dilation_voxels: 4
+
+evaluation:
+  threshold: 0.5
+
+study_metadata:
+  crop_localization: approved_label_oracle
+  deployment_scope: shape_QA_after_oracle_localization
+  training_corruption_overlap: benchmark_independent_stochastic_dropout_plus_continuous_global_sdf_offset
+  primary_hypothesis: removing_missing_only_loss_reduces_foreground_expansion_bias_while_preserving_generic_changed_region_supervision
+  ablation_from: dino_shape_stochastic_region_dropout_Lung_L_v2_global_boundary
+  ablation_change: changed_region_bce_0p30_to_0p50_and_missing_region_bce_0p20_to_0p00

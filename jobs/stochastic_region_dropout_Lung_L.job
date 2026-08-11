@@ -1,0 +1,19 @@
+#!/bin/bash
+#SBATCH --job-name=srd_lungL.job
+#SBATCH --output=stochastic_region_dropout_lungL.out
+#SBATCH --error=stochastic_region_dropout_lungL.err
+#SBATCH -t 24:00:00
+#SBATCH --gres gpu:1
+#SBATCH --cpus-per-task 8
+#SBATCH --mem 80G
+#SBATCH -N 1
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=shaohan@wustl.edu
+
+. ~/miniconda/bin/activate
+conda activate 3DINO
+cd /home/shaohan/contour_qa_experiments
+
+# This experiment is intentionally restarted from scratch. --fresh removes the
+# previous Lung_L stochastic-region-dropout experiment directory before epoch 1.
+bash scripts/dino_shape/run_dino_shape_stochastic_region_dropout_Lung_L_v1.sh --fresh

@@ -69,3 +69,16 @@ figures/
 data/
 datasets/
 radformation-data/
+
+# Slurm job output
+stochastic_region_dropout_*.out
+stochastic_region_dropout_*.err
+[0-9]*_log
+
+# Generic scheduler/stdout-stderr artifacts
+# Keep job scripts tracked; ignore files produced by sbatch regardless of job name.
+slurm-*.out
+slurm-*.err
+*.out
+*.err
+jobs/logs/
