@@ -70,10 +70,17 @@ data/
 datasets/
 radformation-data/
 
-# Slurm job output
-stochastic_region_dropout_*.out
-stochastic_region_dropout_*.err
+# Slurm / scheduler output
+slurm-*.out
+slurm-*.err
+*.out
+*.err
+
+# Cluster job logs without extensions, e.g. 7295944_log
 [0-9]*_log
+
+# Optional dedicated log directories
+jobs/logs/
 
 # Generic scheduler/stdout-stderr artifacts
 # Keep job scripts tracked; ignore files produced by sbatch regardless of job name.
