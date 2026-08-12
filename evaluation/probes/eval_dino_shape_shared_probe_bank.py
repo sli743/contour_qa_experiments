@@ -49,6 +49,15 @@ def main() -> None:
     p.add_argument("--inference-batch-size", type=int, default=8)
     p.add_argument("--save-visualization", action="store_true")
     p.add_argument("--visualization-dir", default=None)
+    p.add_argument(
+        "--ct-dir",
+        default=None,
+        help=(
+            "Directory containing ct_patient_<id>.nii.gz. When omitted, infer a sibling "
+            "ct directory from data.test_label_dir in the config. Required when saving "
+            "ProbeContourComparer-compatible visualizations."
+        ),
+    )
     args = p.parse_args()
 
     cf = load_config(args.config)
@@ -72,6 +81,18 @@ def main() -> None:
     vis = Path(args.visualization_dir).expanduser().resolve() if args.visualization_dir else out / "probe_visualization_shared"
     if args.save_visualization:
         vis.mkdir(parents=True, exist_ok=True)
+        if args.ct_dir:
+            ct_dir = Path(args.ct_dir).expanduser().resolve()
+        else:
+            test_label_dir = Path(cf["data"]["test_label_dir"]).expanduser().resolve()
+            ct_dir = test_label_dir.parent / "ct"
+        if not ct_dir.is_dir():
+            raise FileNotFoundError(
+                f"CT directory required for visualization export was not found: {ct_dir}. "
+                "Pass --ct-dir explicitly if the CTs are stored elsewhere."
+            )
+    else:
+        ct_dir = None
 
     rows = []
     bs = max(1, int(args.inference_batch_size))
@@ -82,9 +103,21 @@ def main() -> None:
         target, target_img = read_binary(group.loc[0, "target_path"], device)
 
         if args.save_visualization:
-            dst = vis / f"clean_input_patient_{patient_id}.nii.gz"
-            if not dst.exists():
-                shutil.copy2(group.loc[0, "target_path"], dst)
+            # Flat file scheme used by the Probe Contour Comparer Slicer extension.
+            clean_dst = vis / f"clean_input_patient_{patient_id}.nii.gz"
+            if not clean_dst.exists():
+                shutil.copy2(group.loc[0, "target_path"], clean_dst)
+
+            ct_src = ct_dir / f"ct_patient_{patient_id}.nii.gz"
+            if not ct_src.is_file():
+                raise FileNotFoundError(
+                    f"Original CT not found for patient {patient_id}: {ct_src}"
+                )
+            ct_img = sitk.ReadImage(str(ct_src))
+            check_geometry(ct_img, target_img, f"CT patient {patient_id}")
+            ct_dst = vis / f"original_ct_patient_{patient_id}.nii.gz"
+            if not ct_dst.exists():
+                shutil.copy2(ct_src, ct_dst)
 
         for start in range(0, len(group), bs):
             chunk = group.iloc[start:start + bs]

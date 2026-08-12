@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=srd_bronchus_v3_sym
+#SBATCH --output=slurm-%x-%j.out
+#SBATCH --error=slurm-%x-%j.err
+#SBATCH --time=24:00:00
+#SBATCH --partition=hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=10
+#SBATCH --mem=64G
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=shaohan@wustl.edu
+
+set -euo pipefail
+cd /home/shaohan/contour_qa_experiments
+bash scripts/dino_shape/run_dino_shape_stochastic_region_dropout_Bronchus_v3_symmetric_changed_loss.sh --fresh
