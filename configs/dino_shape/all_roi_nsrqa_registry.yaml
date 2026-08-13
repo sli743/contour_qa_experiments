@@ -1,0 +1,186 @@
+version: 1
+study_name: all_roi_NSRQA_v1
+study_root: /scratch/shaohan/contour_QA/all_roi_NSRQA_study
+data_root: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom
+shared_probe_root: /scratch/shaohan/contour_QA/shared_probe_banks
+seed: 88
+bootstrap_replicates: 5000
+
+# The same proposed NSR-QA branch mixture and symmetric objective are used for
+# every ROI. Anatomy profiles change only physical corruption scale/topology
+# tolerances and the predeclared bad-segmentation thresholds.
+profiles:
+  large_solid:
+    global_bad_volume_pct: 20
+    local_bad_hd95_mm: 10
+    changed_region_dilation_voxels: 4
+    stochastic:
+      smooth_warp:
+        control_grid_points_zyx: {min: [4, 4, 4], max: [8, 8, 8]}
+        gaussian_sigma_vox: [5.0, 12.0]
+        max_displacement_mm: [3.0, 12.0]
+        upsample_order: 1
+      distance_noise:
+        gaussian_sigma_vox: [4.0, 10.0]
+        amplitude_mm: [2.0, 10.0]
+        remove_small_components: true
+        min_component_voxels: 32
+        keep_largest_component: true
+      global_boundary_offset:
+        magnitude_mm: [1.5, 6.0]
+        outward_probability: 0.50
+      dropout:
+        coarse_grid_points_zyx: {min: [4, 4, 4], max: [8, 8, 8]}
+        correlation_length_mm: [15.0, 45.0]
+        localization_sigma_mm: [20.0, 55.0]
+        random_field_weight: 1.0
+        localization_weight: 1.5
+        localization_cutoff_sigma: 3.5
+        upsample_order: 1
+        threshold_search_steps: 8
+        removed_fraction: [0.05, 0.35]
+        removed_fraction_tolerance: 0.08
+        min_max_depth_mm: 6.0
+        max_max_depth_mm: 55.0
+        max_remaining_components: 1
+        max_attempts: 8
+    random_morphology:
+      morphology_iterations: [1, 4]
+      translation_voxels: [-3, 3]
+      local_ball_radius_voxels: [3, 10]
+
+  medium_tubular:
+    global_bad_volume_pct: 15
+    local_bad_hd95_mm: 6
+    changed_region_dilation_voxels: 3
+    stochastic:
+      smooth_warp:
+        control_grid_points_zyx: {min: [4, 4, 4], max: [7, 7, 7]}
+        gaussian_sigma_vox: [4.0, 10.0]
+        max_displacement_mm: [2.0, 8.0]
+        upsample_order: 1
+      distance_noise:
+        gaussian_sigma_vox: [3.0, 8.0]
+        amplitude_mm: [1.0, 5.0]
+        remove_small_components: true
+        min_component_voxels: 16
+        keep_largest_component: true
+      global_boundary_offset:
+        magnitude_mm: [1.5, 4.5]
+        outward_probability: 0.50
+      dropout:
+        coarse_grid_points_zyx: {min: [4, 4, 4], max: [7, 7, 7]}
+        correlation_length_mm: [10.0, 30.0]
+        localization_sigma_mm: [12.0, 35.0]
+        random_field_weight: 1.0
+        localization_weight: 1.5
+        localization_cutoff_sigma: 3.5
+        upsample_order: 1
+        threshold_search_steps: 8
+        removed_fraction: [0.04, 0.30]
+        removed_fraction_tolerance: 0.07
+        min_max_depth_mm: 3.0
+        max_max_depth_mm: 35.0
+        max_remaining_components: 1
+        max_attempts: 8
+    random_morphology:
+      morphology_iterations: [1, 3]
+      translation_voxels: [-2, 2]
+      local_ball_radius_voxels: [2, 6]
+
+  thin_branching:
+    global_bad_volume_pct: 10
+    local_bad_hd95_mm: 4
+    changed_region_dilation_voxels: 3
+    stochastic:
+      smooth_warp:
+        control_grid_points_zyx: {min: [4, 4, 4], max: [7, 7, 7]}
+        gaussian_sigma_vox: [4.0, 9.0]
+        max_displacement_mm: [2.0, 6.0]
+        upsample_order: 1
+      distance_noise:
+        gaussian_sigma_vox: [2.5, 6.0]
+        amplitude_mm: [0.75, 3.0]
+        remove_small_components: true
+        min_component_voxels: 8
+        keep_largest_component: false
+      global_boundary_offset:
+        magnitude_mm: [1.5, 3.0]
+        outward_probability: 0.50
+      dropout:
+        coarse_grid_points_zyx: {min: [4, 4, 4], max: [7, 7, 7]}
+        correlation_length_mm: [6.0, 20.0]
+        localization_sigma_mm: [8.0, 25.0]
+        random_field_weight: 1.0
+        localization_weight: 1.5
+        localization_cutoff_sigma: 3.5
+        upsample_order: 1
+        threshold_search_steps: 8
+        removed_fraction: [0.03, 0.25]
+        removed_fraction_tolerance: 0.06
+        min_max_depth_mm: 1.5
+        max_max_depth_mm: 20.0
+        max_extra_remaining_components: 3
+        max_attempts: 8
+    random_morphology:
+      morphology_iterations: [1, 2]
+      translation_voxels: [-2, 2]
+      local_ball_radius_voxels: [1, 4]
+
+  complex_multicomponent:
+    global_bad_volume_pct: 15
+    local_bad_hd95_mm: 6
+    changed_region_dilation_voxels: 3
+    stochastic:
+      smooth_warp:
+        control_grid_points_zyx: {min: [4, 4, 4], max: [7, 7, 7]}
+        gaussian_sigma_vox: [4.0, 10.0]
+        max_displacement_mm: [2.0, 8.0]
+        upsample_order: 1
+      distance_noise:
+        gaussian_sigma_vox: [3.0, 8.0]
+        amplitude_mm: [1.0, 5.0]
+        remove_small_components: false
+        min_component_voxels: 8
+        keep_largest_component: false
+      global_boundary_offset:
+        magnitude_mm: [1.5, 4.5]
+        outward_probability: 0.50
+      dropout:
+        coarse_grid_points_zyx: {min: [4, 4, 4], max: [7, 7, 7]}
+        correlation_length_mm: [10.0, 30.0]
+        localization_sigma_mm: [12.0, 35.0]
+        random_field_weight: 1.0
+        localization_weight: 1.5
+        localization_cutoff_sigma: 3.5
+        upsample_order: 1
+        threshold_search_steps: 8
+        removed_fraction: [0.04, 0.30]
+        removed_fraction_tolerance: 0.07
+        min_max_depth_mm: 3.0
+        max_max_depth_mm: 35.0
+        max_extra_remaining_components: 3
+        max_attempts: 8
+    random_morphology:
+      morphology_iterations: [1, 3]
+      translation_voxels: [-3, 3]
+      local_ball_radius_voxels: [2, 6]
+
+rois:
+  Bronchus:       {data_group: airway,             profile: thin_branching}
+  Carina:         {data_group: airway,             profile: thin_branching}
+  Trachea:        {data_group: airway,             profile: medium_tubular}
+  BrachPlx_L:     {data_group: brachial,           profile: thin_branching}
+  BrachPlx_R:     {data_group: brachial,           profile: thin_branching}
+  A_Aorta:        {data_group: heart_core,         profile: medium_tubular}
+  A_Pulmonary:    {data_group: heart_core,         profile: medium_tubular}
+  Heart:          {data_group: heart_core,         profile: large_solid}
+  Lung_L:         {data_group: lungs_chest,        profile: large_solid}
+  Lung_R:         {data_group: lungs_chest,        profile: large_solid}
+  NS_Chestwall:   {data_group: lungs_chest,        profile: complex_multicomponent}
+  Ribs:           {data_group: lungs_chest,        profile: complex_multicomponent}
+  Esophagus:      {data_group: mediastinum_tubes,  profile: medium_tubular}
+  V_VenaCava_S:   {data_group: mediastinum_tubes,  profile: medium_tubular}
+  SpinalCord:     {data_group: spine,               profile: thin_branching}
+  Liver:          {data_group: upper_abdomen,       profile: large_solid}
+  Stomach:        {data_group: upper_abdomen,       profile: large_solid}

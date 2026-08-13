@@ -13,7 +13,7 @@ from sklearn.metrics import auc, roc_curve
 from analysis.generate_four_model_per_probe_reports import (
     METRICS,
     METRIC_LABELS,
-    bootstrap_auc,
+    patient_cluster_bootstrap_auc,
     clean_threshold_and_sensitivity,
     cliffs_delta,
     common_probe_types,
@@ -231,7 +231,9 @@ def main() -> None:
                 fpr, tpr, _ = roc_curve(yy, ss)
                 row["auc"] = float(auc(fpr, tpr))
                 rng = np.random.default_rng(args.seed + model_i * 100 + metric_i)
-                row["auc_ci_low"], row["auc_ci_high"] = bootstrap_auc(yy, ss, args.n_boot, rng)
+                row["auc_ci_low"], row["auc_ci_high"] = patient_cluster_bootstrap_auc(
+                    ds.loc[valid], "__label", score_col, args.n_boot, rng
+                )
                 row["sens_at_95spec"], row["achieved_specificity"], row["roc_threshold_95spec"] = sensitivity_at_specificity(yy, ss, 0.95)
                 roc_payload[metric].append({"model": model_name, "y": yy, "score": ss})
             else:
@@ -279,7 +281,8 @@ def main() -> None:
         "- **Shift probes are excluded** because neither volume-change nor local-depth labeling is appropriate for pure translation.",
         "- Clean contours are included once per patient, not once per probe type.",
         "- The pooled ROC therefore asks whether one detector score separates all substantial supported defects from clean and below-threshold contours.",
-        "- Repair accuracy is not the endpoint; larger input-reconstruction disagreement for bad contours is the desired signal.", "",
+        "- Repair accuracy is not the endpoint; larger input-reconstruction disagreement for bad contours is the desired signal.",
+        f"- AUC confidence intervals use a **patient-cluster bootstrap** ({args.n_boot} replicates): patients are sampled with replacement and all probe rows from each sampled patient are retained together.", "",
         "## Good/bad counts by family", "",
         "| Model | Family | n | bad | good/below-threshold |",
         "|---|---|---:|---:|---:|",
@@ -290,7 +293,7 @@ def main() -> None:
     md += ["", "## Pooled detector performance", ""]
     for metric in METRICS:
         md += [f"### {METRIC_LABELS[metric]}", "",
-               "| Model | Pooled AUC (95% CI) | Sens @95% spec | Bad sens @ clean-95% threshold | Bad-clean signal lift | Cliff's delta | Mean per-probe AUC |",
+               "| Model | Pooled AUC (95% patient-cluster bootstrap CI) | Sens @95% spec | Bad sens @ clean-95% threshold | Bad-clean signal lift | Cliff's delta | Mean per-probe AUC |",
                "|---|---:|---:|---:|---:|---:|---:|"]
         sub = summary.loc[summary["metric"].eq(metric)]
         for _, r in sub.iterrows():
@@ -322,6 +325,9 @@ def main() -> None:
         "global_volume_threshold_pct": args.volume_threshold_pct,
         "local_hd95_threshold_mm": args.local_depth_threshold_mm,
         "normalized_severity_boundary": 1.0,
+        "auc_ci_bootstrap_unit": "patient",
+        "auc_ci_n_boot": args.n_boot,
+        "auc_ci_seed": args.seed,
     }
     (args.output_dir / "analysis_metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     print(f"Wrote pooled four-model report: {args.output_dir / 'all_probes_four_model_comparison.md'}")

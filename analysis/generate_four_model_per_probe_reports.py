@@ -120,16 +120,54 @@ def dedup_clean(df: pd.DataFrame, probe_col: str, patient_col: str | None) -> pd
     return c
 
 
-def bootstrap_auc(y: np.ndarray, score: np.ndarray, n_boot: int, rng: np.random.Generator) -> tuple[float, float]:
-    vals = []
-    n = len(y)
+def patient_cluster_bootstrap_auc(
+    df: pd.DataFrame,
+    label_col: str,
+    score_col: str,
+    n_boot: int,
+    rng: np.random.Generator,
+    patient_col: str = "__patient_norm",
+) -> tuple[float, float]:
+    """Bootstrap AUC by resampling patients and retaining all rows per sampled patient."""
+    if patient_col not in df.columns:
+        raise ValueError(
+            f"Patient-cluster bootstrap requires {patient_col!r}; "
+            "the evaluation CSV must contain a patient/case identifier."
+        )
+
+    work = df[[patient_col, label_col, score_col]].copy()
+    work[label_col] = pd.to_numeric(work[label_col], errors="coerce")
+    work[score_col] = pd.to_numeric(work[score_col], errors="coerce")
+    work = work.loc[
+        work[label_col].notna()
+        & work[score_col].notna()
+        & np.isfinite(work[score_col])
+    ].copy()
+    if work.empty:
+        return np.nan, np.nan
+
+    patients = work[patient_col].astype(str).drop_duplicates().to_numpy()
+    if patients.size < 2:
+        return np.nan, np.nan
+    patient_str = work[patient_col].astype(str)
+    blocks = {
+        patient: (
+            work.loc[patient_str.eq(patient), label_col].astype(int).to_numpy(),
+            work.loc[patient_str.eq(patient), score_col].to_numpy(float),
+        )
+        for patient in patients
+    }
+
+    vals: list[float] = []
     for _ in range(n_boot):
-        idx = rng.integers(0, n, n)
-        yy = y[idx]
+        sampled = rng.choice(patients, size=len(patients), replace=True)
+        yy = np.concatenate([blocks[p][0] for p in sampled])
+        ss = np.concatenate([blocks[p][1] for p in sampled])
         if np.unique(yy).size < 2:
             continue
-        fpr, tpr, _ = roc_curve(yy, score[idx])
-        vals.append(auc(fpr, tpr))
+        fpr, tpr, _ = roc_curve(yy, ss)
+        vals.append(float(auc(fpr, tpr)))
+
     if not vals:
         return np.nan, np.nan
     return float(np.quantile(vals, 0.025)), float(np.quantile(vals, 0.975))
@@ -507,7 +545,8 @@ def main() -> None:
         f"- Local probes (`big_bite`, `big_blob`): bad if **HD95(input,target) > {args.local_depth_threshold_mm:g} mm**.",
         "  This is computed independently for each model's realized local probe, so random bite/blob anchors do not have to match across models.",
         "- Shift probes are excluded from this two-criterion report and should be assessed separately by physical displacement.",
-        "- Each corruption type gets its own ROC analysis and Markdown report.", "",
+        "- Each corruption type gets its own ROC analysis and Markdown report.",
+        f"- AUC confidence intervals use a **patient-cluster bootstrap** ({args.n_boot} replicates): patients are sampled with replacement and all probe rows from each sampled patient are retained together.", "",
         "## Reports", "",
     ]
 
@@ -552,7 +591,9 @@ def main() -> None:
                     fpr, tpr, _ = roc_curve(yy, ss)
                     row["auc"] = float(auc(fpr, tpr))
                     rng = np.random.default_rng(args.seed + probe_i * 10000 + model_i * 100 + metric_i)
-                    row["auc_ci_low"], row["auc_ci_high"] = bootstrap_auc(yy, ss, args.n_boot, rng)
+                    row["auc_ci_low"], row["auc_ci_high"] = patient_cluster_bootstrap_auc(
+                        ds.loc[valid], "__label", score_col, args.n_boot, rng
+                    )
                     row["sens_at_95spec"], row["achieved_specificity"], row["roc_threshold_95spec"] = sensitivity_at_specificity(yy, ss, 0.95)
                     roc_payload[metric].append({"model": model_name, "y": yy, "score": ss})
                 else:
@@ -604,14 +645,15 @@ def main() -> None:
             f"- Included corrupted samples: **{probe} only**.",
             "- Negative class: one clean contour per patient plus milder samples of this same corruption type that do not cross the criterion.",
             "- Higher detector score means larger disagreement between input contour and decoder reconstruction.",
-            "- Repair gain is not the primary endpoint; the goal is a larger anomaly signal for substantial defects.", "",
+            "- Repair gain is not the primary endpoint; the goal is a larger anomaly signal for substantial defects.",
+            f"- AUC confidence intervals use a **patient-cluster bootstrap** ({args.n_boot} replicates): patients are sampled with replacement and all rows from each sampled patient are retained together.", "",
             "## Per-metric results", "",
         ]
         for metric in METRICS:
             sub = summary.loc[summary["metric"].eq(metric)].copy()
             md += [f"### {METRIC_LABELS[metric]}", ""]
             md += [
-                "| Model | AUC (95% CI) | Sens @ 95% spec | Severe sens @ clean-95% threshold | Median severe-clean signal lift | Cliff's delta severe vs clean | Spearman rho(severity, signal) |",
+                "| Model | AUC (95% patient-cluster bootstrap CI) | Sens @ 95% spec | Severe sens @ clean-95% threshold | Median severe-clean signal lift | Cliff's delta severe vs clean | Spearman rho(severity, signal) |",
                 "|---|---:|---:|---:|---:|---:|---:|",
             ]
             for _, r in sub.iterrows():
@@ -653,6 +695,9 @@ def main() -> None:
         "probe_types": probes,
         "primary_project_endpoint": "large anomaly signal rather than reconstruction repair",
         "per_probe_population": "one probe family plus one clean row per patient; mild same-family corruptions are negatives",
+        "auc_ci_bootstrap_unit": "patient",
+        "auc_ci_n_boot": args.n_boot,
+        "auc_ci_seed": args.seed,
     }
     (args.output_dir / "analysis_metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
     print(f"Generated {len(probes)} per-probe four-model reports under {args.output_dir}")
