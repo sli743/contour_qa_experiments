@@ -16,8 +16,7 @@ line="${line%$'\r'}"
 IFS=$'\t' read -r roi_index registry_index ROI data_group profile GLOBAL_THRESHOLD_PCT LOCAL_DEPTH_MM PILOT_CONFIG BENCH_CONFIG RANDOM_CONFIG NSRQA_CONFIG <<< "${line}"
 
 cd "${PROJECT_ROOT}"
-source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate "${CONDA_ENV:-3DINO}"
+source "${PROJECT_ROOT}/scripts/dino_shape/activate_3dino_env.sh"
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 unset PYTORCH_CUDA_ALLOC_CONF || true
 
@@ -35,6 +34,9 @@ PILOT_OUT="${EVAL_ROOT}/pilot/probe_eval_shared_seed_test"
 BENCH_OUT="${EVAL_ROOT}/benchmark_overlap/probe_eval_shared_seed_test"
 RANDOM_OUT="${EVAL_ROOT}/random_morphology/probe_eval_shared_seed_test"
 NSRQA_OUT="${EVAL_ROOT}/nsrqa/probe_eval_shared_seed_test"
+PILOT_VIS="${PILOT_OUT}/probe_visualization_shared"
+BENCH_VIS="${BENCH_OUT}/probe_visualization_shared"
+RANDOM_VIS="${RANDOM_OUT}/probe_visualization_shared"
 NSRQA_VIS="${NSRQA_OUT}/probe_visualization_shared"
 REPORT_ROOT="${STUDY_ROOT}/reports/${ROI}_four_models_NSRQA_shared_probe"
 POOLED_OUT="${REPORT_ROOT}/pooled"; BY_PROBE_OUT="${REPORT_ROOT}/by_probe"; MASTER_REPORT="${REPORT_ROOT}/report.md"
@@ -43,22 +45,45 @@ echo "[${ROI}] Build/reuse shared probe bank"
 python -m evaluation.probes.build_shared_probe_bank --config "${NSRQA_CONFIG}" --split test --output-dir "${BANK_DIR}" --seed "${SEED}"
 
 run_eval() {
-  local name="$1" config="$2" out="$3" savevis="$4"
+  local name="$1" config="$2" out="$3" vis="$4"
   local csv="${out}/probe_eval_sweep_detailed.csv"
-  if [[ "${FORCE_EVAL}" != "1" && -s "${csv}" ]]; then echo "Reusing ${name}: ${csv}"; return; fi
+  local have_vis=0
+
+  if [[ -d "${vis}" ]] && compgen -G "${vis}/reconstruction_*.nii.gz" >/dev/null; then
+    have_vis=1
+  fi
+
+  if [[ "${FORCE_EVAL}" != "1" && -s "${csv}" && "${have_vis}" == "1" ]]; then
+    echo "Reusing ${name}: ${csv}"
+    echo "Reusing ${name} visualization: ${vis}"
+    return
+  fi
+
+  if [[ "${FORCE_EVAL}" != "1" && -s "${csv}" && "${have_vis}" != "1" ]]; then
+    echo "${name} metrics exist but visualization is missing; rerunning inference to export visualization."
+  fi
+
   rm -rf "${out}"
-  args=(--config "${config}" --probe-bank "${BANK_DIR}" --output-dir "${out}" --inference-batch-size "${BATCH_SIZE}")
-  if [[ "${savevis}" == "1" ]]; then args+=(--save-visualization --visualization-dir "${NSRQA_VIS}"); fi
-  python -m evaluation.probes.eval_dino_shape_shared_probe_bank "${args[@]}"
+  python -m evaluation.probes.eval_dino_shape_shared_probe_bank \
+    --config "${config}" \
+    --probe-bank "${BANK_DIR}" \
+    --output-dir "${out}" \
+    --inference-batch-size "${BATCH_SIZE}" \
+    --save-visualization \
+    --visualization-dir "${vis}"
 }
-run_eval "Clean AE" "${PILOT_CONFIG}" "${PILOT_OUT}" 0
-run_eval "Benchmark-overlap DAE" "${BENCH_CONFIG}" "${BENCH_OUT}" 0
-run_eval "Random-morphology DAE" "${RANDOM_CONFIG}" "${RANDOM_OUT}" 0
-run_eval "NSR-QA" "${NSRQA_CONFIG}" "${NSRQA_OUT}" 1
+run_eval "Clean AE" "${PILOT_CONFIG}" "${PILOT_OUT}" "${PILOT_VIS}"
+run_eval "Benchmark-overlap DAE" "${BENCH_CONFIG}" "${BENCH_OUT}" "${BENCH_VIS}"
+run_eval "Random-morphology DAE" "${RANDOM_CONFIG}" "${RANDOM_OUT}" "${RANDOM_VIS}"
+run_eval "NSR-QA" "${NSRQA_CONFIG}" "${NSRQA_OUT}" "${NSRQA_VIS}"
 
 PILOT_CSV="${PILOT_OUT}/probe_eval_sweep_detailed.csv"; BENCH_CSV="${BENCH_OUT}/probe_eval_sweep_detailed.csv"; RANDOM_CSV="${RANDOM_OUT}/probe_eval_sweep_detailed.csv"; NSRQA_CSV="${NSRQA_OUT}/probe_eval_sweep_detailed.csv"
 python -m analysis.verify_shared_probe_evaluations --csv "Clean AE=${PILOT_CSV}" --csv "Benchmark-overlap DAE=${BENCH_CSV}" --csv "Random-morphology DAE=${RANDOM_CSV}" --csv "NSR-QA=${NSRQA_CSV}"
-python -m analysis.verify_probe_contour_comparer_visualization --manifest "${BANK_DIR}/probe_bank_manifest.csv" --visualization-dir "${NSRQA_VIS}"
+for vis in "${PILOT_VIS}" "${BENCH_VIS}" "${RANDOM_VIS}" "${NSRQA_VIS}"; do
+  python -m analysis.verify_probe_contour_comparer_visualization \
+    --manifest "${BANK_DIR}/probe_bank_manifest.csv" \
+    --visualization-dir "${vis}"
+done
 
 rm -rf "${REPORT_ROOT}"; mkdir -p "${POOLED_OUT}" "${BY_PROBE_OUT}"
 models=(--model "Clean AE=${PILOT_CSV}" --model "Benchmark-overlap DAE=${BENCH_CSV}" --model "Random-morphology DAE=${RANDOM_CSV}" --model "NSR-QA=${NSRQA_CSV}")
@@ -68,4 +93,8 @@ python -m analysis.compose_four_model_shared_probe_report --pooled-dir "${POOLED
 if command -v pandoc >/dev/null 2>&1; then (cd "${REPORT_ROOT}" && pandoc report.md --standalone --embed-resources -o report.html || true); fi
 
 echo "Done ${ROI}: ${MASTER_REPORT}"
-echo "Slicer/CT visualization: ${NSRQA_VIS}"
+echo "Slicer/CT visualizations:"
+echo "  Clean AE:              ${PILOT_VIS}"
+echo "  Benchmark-overlap DAE: ${BENCH_VIS}"
+echo "  Random-morphology DAE: ${RANDOM_VIS}"
+echo "  NSR-QA:                ${NSRQA_VIS}"

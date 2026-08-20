@@ -113,6 +113,18 @@ class TrainingCorruptionExampleViewerWidget(ScriptedLoadableModuleWidget):
         self.opacitySlider.decimals = 2
         visForm.addRow("2D fill opacity:", self.opacitySlider)
 
+        self.outlineThicknessSlider = ctk.ctkSliderWidget()
+        self.outlineThicknessSlider.minimum = 1
+        self.outlineThicknessSlider.maximum = 10
+        self.outlineThicknessSlider.singleStep = 1
+        self.outlineThicknessSlider.value = 1
+        self.outlineThicknessSlider.decimals = 0
+        self.outlineThicknessSlider.toolTip = (
+            "Thickness of 2D contour outlines in slice views. "
+            "This is applied to both primary contours and diagnostic masks."
+        )
+        visForm.addRow("2D contour thickness:", self.outlineThicknessSlider)
+
         self.show3DCheckBox = qt.QCheckBox()
         self.show3DCheckBox.checked = False
         visForm.addRow("Show contours in 3D:", self.show3DCheckBox)
@@ -153,6 +165,7 @@ class TrainingCorruptionExampleViewerWidget(ScriptedLoadableModuleWidget):
         self.showCTCheckBox.connect("toggled(bool)", self.updateVisibility)
         self.show3DCheckBox.connect("toggled(bool)", self.updateVisibility)
         self.opacitySlider.connect("valueChanged(double)", self.updateVisibility)
+        self.outlineThicknessSlider.connect("valueChanged(double)", self.updateVisibility)
         self.fitViewsButton.connect("clicked()", self.fitViews)
         self.loadAuxButton.connect("clicked()", self.onLoadAux)
         for cb in self.primaryChecks.values():
@@ -262,6 +275,11 @@ class TrainingCorruptionExampleViewerWidget(ScriptedLoadableModuleWidget):
             display.SetVisibility2D(True)
             display.SetVisibility3D(bool(self.show3DCheckBox.checked))
             fillOpacity = float(self.opacitySlider.value)
+            outlineThickness = max(1, int(round(float(self.outlineThicknessSlider.value))))
+            try:
+                display.SetSliceIntersectionThickness(outlineThickness)
+            except Exception:
+                logging.warning("This Slicer version does not support adjustable segmentation outline thickness.")
             for key, segId in self.primarySegmentIds.items():
                 visible = bool(self.primaryChecks[key].checked)
                 display.SetSegmentVisibility(segId, visible)
@@ -278,6 +296,11 @@ class TrainingCorruptionExampleViewerWidget(ScriptedLoadableModuleWidget):
             display.SetVisibility(True)
             display.SetVisibility2D(True)
             display.SetVisibility3D(bool(self.show3DCheckBox.checked))
+            outlineThickness = max(1, int(round(float(self.outlineThicknessSlider.value))))
+            try:
+                display.SetSliceIntersectionThickness(outlineThickness)
+            except Exception:
+                logging.warning("This Slicer version does not support adjustable segmentation outline thickness.")
             for key, segId in self.auxSegmentIds.items():
                 visible = bool(self.auxChecks[key].checked)
                 display.SetSegmentVisibility(segId, visible)

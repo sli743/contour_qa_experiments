@@ -11,8 +11,7 @@ line="$(awk -F '\t' -v idx="${TASK_INDEX}" 'NR>1 && $1==idx {print; exit}' "${TA
 line="${line%$'\r'}"
 IFS=$'\t' read -r task_index roi model config <<< "${line}"
 cd "${PROJECT_ROOT}"
-source "$(conda info --base)/etc/profile.d/conda.sh"
-conda activate "${CONDA_ENV:-3DINO}"
+source "${PROJECT_ROOT}/scripts/dino_shape/activate_3dino_env.sh"
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}" MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}" OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-1}"
 unset PYTORCH_CUDA_ALLOC_CONF || true
