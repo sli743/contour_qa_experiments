@@ -27,7 +27,17 @@ import yaml
 from torch.utils.data import DataLoader, Dataset, get_worker_info
 
 from models.dino_shape.dino_shape_autoencoder import Frozen3DINOShapeAutoencoder
-from training.corruptions.stochastic_region_dropout import stochastic_region_dropout_corruption
+from training.corruptions.nsrqa_corruption_dispatch import (
+    apply_nsrqa_corruption,
+    corruption_backend,
+    corruption_signature,
+)
+from training.spatial_reference import (
+    SPATIAL_CONTEXT_FEATURES,
+    deployment_centered_training_pair,
+    raw_ct_path,
+    read_raw_ct_geometry,
+)
 
 
 def parse_args():
@@ -70,18 +80,35 @@ class BinaryROIDataset(Dataset):
     def load_item(self, index):
         path = self.files[index]
         t0 = time.perf_counter()
-        arr = sitk.GetArrayFromImage(sitk.ReadImage(str(path)))
+        img = sitk.ReadImage(str(path))
+        arr = sitk.GetArrayFromImage(img)
         load_seconds = time.perf_counter() - t0
         mask = (arr > 0).astype(np.float32)
         if mask.ndim != 3:
             raise ValueError(f"Expected 3D mask, got {mask.shape}: {path}")
-        return torch.from_numpy(mask)[None], patient_id_from_name(path.name), load_seconds
+
+        # SimpleITK direction columns map increasing image-index axes to LPS
+        # physical coordinates. NumPy array-z is the image z index. Positive
+        # physical LPS z is superior, so inferior lies at low array-z when the
+        # z-index direction has a positive superior component. The coverage-safe
+        # SpinalCord preprocessing preserves an orthogonal medical-image grid.
+        direction = np.asarray(img.GetDirection(), dtype=float).reshape(3, 3)
+        z_axis_lps = direction[:, 2]
+        inferior_is_low_z = bool(float(z_axis_lps[2]) >= 0.0)
+        return (
+            torch.from_numpy(mask)[None],
+            patient_id_from_name(path.name),
+            load_seconds,
+            inferior_is_low_z,
+            img,
+        )
 
     def __getitem__(self, index):
-        mask, patient_id, load_seconds = self.load_item(index)
+        mask, patient_id, load_seconds, inferior_is_low_z, _img = self.load_item(index)
         return {
             "mask": mask,
             "patient_id": patient_id,
+            "inferior_is_low_z": inferior_is_low_z,
             "load_seconds": torch.tensor(load_seconds, dtype=torch.float64),
         }
 
@@ -100,6 +127,12 @@ class CorruptedROIDataset(Dataset):
         self.train = bool(train)
         self.base_seed = int(cfg.get("seed", 88))
         self._worker_rng = None
+        self._worker_jitter_rng = None
+        self._raw_ct_geometry_cache = {}
+        self.spatial_enabled = bool((cfg.get("spatial_conditioning") or {}).get("enabled", False))
+        self.raw_data_root = (cfg.get("spatial_conditioning") or {}).get("raw_data_root")
+        if self.spatial_enabled and not self.raw_data_root:
+            raise KeyError("spatial_conditioning.raw_data_root is required when spatial conditioning is enabled")
 
     def __len__(self):
         return len(self.base)
@@ -117,21 +150,61 @@ class CorruptedROIDataset(Dataset):
             self._worker_rng = random.Random(int(worker_seed) % (2**63 - 1))
         return self._worker_rng
 
+    def _jitter_rng(self, patient_id: str) -> random.Random:
+        if not self.train:
+            return random.Random(stable_seed(f"reference-jitter:{patient_id}", self.base_seed))
+        if self._worker_jitter_rng is None:
+            info = get_worker_info()
+            worker_seed = info.seed if info is not None else torch.initial_seed()
+            self._worker_jitter_rng = random.Random((int(worker_seed) + 0x5EEDBEEF) % (2**63 - 1))
+        return self._worker_jitter_rng
+
+    def _raw_ct(self, patient_id: str):
+        if not self.spatial_enabled:
+            return None
+        key = str(patient_id)
+        if key not in self._raw_ct_geometry_cache:
+            path = raw_ct_path(self.raw_data_root, key)
+            if not path.is_file():
+                raise FileNotFoundError(f"Raw CT required for spatial conditioning: {path}")
+            self._raw_ct_geometry_cache[key] = read_raw_ct_geometry(path)
+        return self._raw_ct_geometry_cache[key]
+
     def __getitem__(self, index):
-        target, patient_id, load_seconds = self.base.load_item(index)
+        target, patient_id, load_seconds, inferior_is_low_z, crop_img = self.base.load_item(index)
         t0 = time.perf_counter()
-        corrupted, changed, metadata = stochastic_region_dropout_corruption(
-            target, self.cfg, self._rng(patient_id), cache_key=str(patient_id)
+        corrupted, _changed, metadata = apply_nsrqa_corruption(
+            target,
+            self.cfg,
+            self._rng(patient_id),
+            cache_key=str(patient_id),
+            inferior_is_low_z=inferior_is_low_z,
+        )
+        target, corrupted, changed, spatial_context, reference_meta = deployment_centered_training_pair(
+            target,
+            corrupted,
+            crop_img,
+            self._raw_ct(patient_id),
+            self.cfg,
+            self._jitter_rng(patient_id),
+            train=self.train,
         )
         corruption_seconds = time.perf_counter() - t0
         metadata = dict(metadata)
+        metadata.update(reference_meta)
         metadata["patient_id"] = str(patient_id)
         metadata["dataset_corruption_seconds"] = float(corruption_seconds)
+        context_tensor = (
+            torch.from_numpy(spatial_context.astype(np.float32, copy=False))
+            if spatial_context is not None else torch.empty((0,), dtype=torch.float32)
+        )
         return {
             "mask": target,
             "corrupted": corrupted,
             "changed": changed,
+            "spatial_context": context_tensor,
             "patient_id": str(patient_id),
+            "inferior_is_low_z": inferior_is_low_z,
             "metadata_json": json.dumps(metadata, allow_nan=True),
             "load_seconds": torch.tensor(load_seconds, dtype=torch.float64),
             "corruption_seconds": torch.tensor(corruption_seconds, dtype=torch.float64),
@@ -154,7 +227,7 @@ def _unpack_bool(bits: np.ndarray, shape: Sequence[int]) -> torch.Tensor:
 def validation_cache_fingerprint(cfg: Dict) -> str:
     payload = {
         "seed": int(cfg.get("seed", 88)),
-        "stochastic_region_dropout": cfg["stochastic_region_dropout"],
+        "corruption": corruption_signature(cfg),
         "validation_label_dir": str(cfg["data"]["validation_label_dir"]),
     }
     text = json.dumps(payload, sort_keys=True, separators=(",", ":"))
@@ -221,7 +294,7 @@ class CachedValidationROIDataset(Dataset):
         return self.base.files
 
     def __getitem__(self, index):
-        target, patient_id, load_seconds = self.base.load_item(index)
+        target, patient_id, load_seconds, inferior_is_low_z, _crop_img = self.base.load_item(index)
         t0 = time.perf_counter()
         cache_path = _cache_filename(self.cache_dir, patient_id)
         if not cache_path.is_file():
@@ -238,7 +311,9 @@ class CachedValidationROIDataset(Dataset):
             "mask": target,
             "corrupted": corrupted,
             "changed": changed,
+            "spatial_context": torch.empty((0,), dtype=torch.float32),
             "patient_id": str(patient_id),
+            "inferior_is_low_z": inferior_is_low_z,
             "metadata_json": json.dumps(meta, allow_nan=True),
             "load_seconds": torch.tensor(load_seconds + cache_seconds, dtype=torch.float64),
             "corruption_seconds": torch.tensor(0.0, dtype=torch.float64),
@@ -378,6 +453,11 @@ def run_epoch(model, loader, optimizer, device, cfg, train: bool, epoch: int):
         target = batch["mask"].to(device, non_blocking=True)
         corrupted = batch["corrupted"].to(device, non_blocking=True)
         changed = batch["changed"].to(device, non_blocking=True)
+        spatial_context = batch.get("spatial_context")
+        if spatial_context is not None:
+            spatial_context = spatial_context.to(device, non_blocking=True)
+            if spatial_context.shape[-1] == 0:
+                spatial_context = None
         _cuda_sync(device, timing_enabled and sync_cuda)
         timing["host_to_device_seconds"] += time.perf_counter() - t0
 
@@ -389,7 +469,7 @@ def run_epoch(model, loader, optimizer, device, cfg, train: bool, epoch: int):
             _cuda_sync(device, timing_enabled and sync_cuda)
             t0 = time.perf_counter()
             with amp_context(device, precision):
-                logits, _ = model(corrupted)
+                logits, _ = model(corrupted, spatial_context=spatial_context)
             _cuda_sync(device, timing_enabled and sync_cuda)
             timing["forward_seconds"] += time.perf_counter() - t0
 
@@ -541,10 +621,13 @@ def main():
     with open(config_path, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     required = ["experiment_name", "output_root", "dino", "data",
-                "decoder", "stochastic_region_dropout", "training", "loss"]
+                "decoder", "training", "loss"]
     missing = [key for key in required if key not in cfg]
     if missing:
         raise KeyError(f"Missing required config sections: {missing}")
+    # Validate the corruption backend before touching the output directory.
+    backend = corruption_backend(cfg)
+    corruption_signature(cfg)
     seed_all(int(cfg.get("seed", 88)))
 
     experiment_dir = Path(cfg["output_root"]) / cfg["experiment_name"]
@@ -580,6 +663,12 @@ def main():
 
     validation_cache_cfg = cfg["training"].get("validation_cache", {})
     validation_cache_enabled = bool(validation_cache_cfg.get("enabled", True))
+    if bool((cfg.get("reference_frame_training") or {}).get("candidate_centered", False)) and validation_cache_enabled:
+        raise ValueError(
+            "Candidate-centered reference-frame training currently requires "
+            "training.validation_cache.enabled=false because the cached legacy target "
+            "does not carry the per-corruption crop transform."
+        )
     if validation_cache_enabled:
         fingerprint = validation_cache_fingerprint(cfg)
         cache_root = Path(validation_cache_cfg.get(
@@ -599,6 +688,11 @@ def main():
         checkpoint_path=cfg["dino"]["checkpoint_path"],
         config_name=cfg["dino"].get("config_name", "train/vit3d_highres"),
         decoder_channels=cfg["decoder"].get("channels", [256, 128, 64, 32]),
+        spatial_context_dim=(
+            int((cfg.get("spatial_conditioning") or {}).get("context_dim", len(SPATIAL_CONTEXT_FEATURES)))
+            if bool((cfg.get("spatial_conditioning") or {}).get("enabled", False)) else 0
+        ),
+        spatial_context_hidden_dim=int((cfg.get("spatial_conditioning") or {}).get("hidden_dim", 64)),
     ).to(device)
 
     if any(parameter.requires_grad for parameter in model.encoder.parameters()):
@@ -609,6 +703,7 @@ def main():
         weight_decay=float(cfg["training"].get("weight_decay", 1e-4)))
 
     print(f"Experiment: {cfg['experiment_name']}")
+    print(f"Corruption backend: {backend}")
     print(f"Train/validation cases: {len(train_ds)}/{len(val_ds)}")
     print(f"Frozen encoder params: {sum(p.numel() for p in model.encoder.parameters()):,}")
     print(f"Trainable decoder params: {sum(p.numel() for p in model.decoder.parameters() if p.requires_grad):,}")
@@ -648,13 +743,13 @@ def main():
             best = float(checkpoint.get("validation_total", float("inf")))
         bad_epochs = int(checkpoint.get("bad_epochs", hist_bad))
 
-        old_impl = str(checkpoint.get("config", {}).get("stochastic_region_dropout", {}).get("implementation_version", "legacy"))
-        new_impl = str(cfg.get("stochastic_region_dropout", {}).get("implementation_version", "legacy"))
-        if old_impl != new_impl:
+        old_sig = corruption_signature(checkpoint.get("config", {}))
+        new_sig = corruption_signature(cfg)
+        if old_sig != new_sig:
             print(
-                f"WARNING: corruption implementation changed ({old_impl} -> {new_impl}). "
+                "WARNING: corruption configuration changed while resuming. "
                 "Decoder/optimizer are resumed, but validation-best and early-stopping counters are reset "
-                "because the deterministic validation corruptions may differ numerically.",
+                "because deterministic validation corruptions may differ.",
                 flush=True,
             )
             best = float("inf")
@@ -685,6 +780,9 @@ def main():
                     "max_displacement_mm", "warp_sigma_vox",
                     "distance_noise_amplitude_mm", "distance_noise_sigma_vox",
                     "input_component_count", "input_largest_component_fraction",
+                    "candidate_centering_target_clips",
+                    "reference_frame_shift_z_vox", "reference_frame_shift_y_vox", "reference_frame_shift_x_vox",
+                    "fov_jitter_shift_z_mm", "fov_jitter_shift_y_mm", "fov_jitter_shift_x_mm",
                 ]
                 summary = {"epoch": epoch, "n": len(rows)}
                 branches = {}
@@ -753,6 +851,10 @@ def main():
                     "global_boundary_offset_magnitude_mm",
                     "global_boundary_offset_rejected_to_clean",
                     "global_boundary_offset_volume_change_pct",
+                    "reference_frame_mode", "candidate_centering_target_clips",
+                    "reference_frame_shift_z_vox", "reference_frame_shift_y_vox", "reference_frame_shift_x_vox",
+                    "fov_jitter_shift_z_vox", "fov_jitter_shift_y_vox", "fov_jitter_shift_x_vox",
+                    "fov_jitter_shift_z_mm", "fov_jitter_shift_y_mm", "fov_jitter_shift_x_mm",
                 ]
                 write_header = not validation_detail_path.exists()
                 with open(validation_detail_path, "a", newline="", encoding="utf-8") as vf:

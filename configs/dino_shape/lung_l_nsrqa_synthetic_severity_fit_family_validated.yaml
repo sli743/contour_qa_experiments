@@ -1,0 +1,155 @@
+version: 1
+experiment_name: lung_l_nsrqa_synthetic_severity_fit_v3_family_validated
+seed: 91
+
+# Prefer the first-pass data-calibrated config if it has already been generated.
+# If that file is absent, fall back to the previous-generation Lung_L NSR-QA
+# config; the optimization criterion itself is unchanged.
+initial_training_config: /scratch/shaohan/contour_QA/lung_l_nsrqa_severity_calibration_v1/recommended_training_config.yaml
+fallback_training_config: configs/dino_shape/dino_shape_stochastic_region_dropout_Lung_L_v3_symmetric_changed_loss.yaml
+
+# Real approved-vs-autoseg error measurements from training1 only.
+error_field_root: /scratch/shaohan/contour_QA/lung_l_error_field_characterization_v1
+
+data:
+  train_label_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/lungs_chest/Lung_L/training1/lungs_chest/Lung_L/labels
+  train_ct_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/lungs_chest/Lung_L/training1/lungs_chest/Lung_L/ct
+
+# These are fixed by design for this experiment. The script refuses to fit if
+# the supplied training config changed the original NSR-QA mixture.
+fixed_mixture:
+  clean_probability: 0.20
+  branch_probabilities:
+    smooth_warp: 0.10
+    distance_noise: 0.20
+    combined: 0.15
+    stochastic_region_dropout: 0.20
+    global_boundary_offset: 0.15
+
+calibration:
+  # Empty for the initial fit. Known anatomical-OOD/questionable approved
+  # contours may be listed here later for a sensitivity analysis.
+  exclude_patient_ids: []
+
+# Stochastic regional dropout is calibrated separately from real connected
+# missing components. One target per patient is used: the largest significant
+# missing component with non-zero penetration depth and surface footprint.
+# The generator preserves random location/shape but matches the joint target
+# (removed fraction, max depth, surface footprint) and keeps the closest valid
+# proposal rather than silently reverting to clean.
+dropout_component_calibration:
+  minimum_component_cases: 8
+  winsor_quantiles: [0.10, 0.90]
+  target_log_jitter: 0.10
+  fraction_relative_tolerance: 0.40
+  depth_tolerance_mm: 3.0
+  footprint_relative_tolerance: 0.60
+  accept_best_valid_fallback: true
+  max_fallback_loss: 8.0
+  max_fraction_multiplier: 3.0
+  max_depth_extra_mm: 12.0
+  max_attempts: 24
+  threshold_search_steps: 12
+
+objective:
+  # Robust quantile matching. P50/P75/P90 receive more weight than P25.
+  quantiles: [0.25, 0.50, 0.75, 0.90]
+  quantile_weights:
+    0.25: 1.0
+    0.50: 2.0
+    0.75: 2.0
+    0.90: 2.0
+
+  # Lung_L is a large-volume ROI, so HD95 is emphasized. HD99 is deliberately
+  # audit-only and has zero influence on severity fitting.
+  metric_weights:
+    one_minus_dice: 1.0
+    assd_mm: 1.0
+    hd95_mm: 2.0
+    hd99_mm: 0.0
+    missing_fraction_gt: 1.0
+    excess_fraction_gt: 1.0
+
+  minimum_real_cases: 12
+  minimum_changed_samples: 30
+  minimum_changed_fraction_gt: 1.0e-8
+
+  # Intentional clean samples are excluded from fitting. This aggregate term is
+  # retained as a secondary diagnostic; per-family no-op limits below are hard
+  # candidate-eligibility constraints and cannot be compensated by another branch.
+  target_noop_rate: 0.05
+  noop_penalty_weight: 4.0
+
+# Realized-change constraints. During stage-1/stage-2 search, violations add a
+# strong finite penalty so the optimizer can still move toward a feasible region.
+# The same <=5% limits become hard PASS/FAIL criteria only on the larger
+# independent validation audit that controls whether best_fit_training_config.yaml
+# is emitted.
+family_validity:
+  enabled: true
+  minimum_samples_per_branch: 8
+  max_noop_rate: 0.05
+  max_noop_rate_by_branch:
+    smooth_warp: 0.05
+    distance_noise: 0.05
+    combined: 0.05
+    stochastic_region_dropout: 0.05
+    global_boundary_offset: 0.05
+  minimum_changed_fraction_gt: 1.0e-8
+
+  # Search-stage guidance only. These penalties are finite by design; the final
+  # independent audit below still enforces max_noop_rate as a hard criterion.
+  search_noop_penalty_weight: 25.0
+  search_insufficient_samples_penalty: 25.0
+
+  # For the signed-distance threshold (>0), an outward displacement of exactly
+  # one voxel spacing can still be unchanged. The effective lower search bound
+  # is therefore at least 1.05 * min(voxel spacing); the actual branch is still
+  # required to pass the <=5% realized no-op audit.
+  global_offset_min_voxel_factor: 1.05
+
+# Three family-level multipliers are fitted. The combined branch automatically
+# uses the fitted smooth and distance-noise multipliers. Regional dropout is
+# fixed by the connected-component calibration above, not by a scalar multiplier.
+search:
+  # Samples are deterministically stratified by the normalized non-clean branch
+  # probabilities for every candidate. With 160 draws this gives 20/40/30/40/30
+  # smooth/noise/combined/dropout/global samples, respectively.
+  samples_per_candidate: 160
+  isotropic_scales: [1.5, 2.0, 3.0, 4.0, 6.0, 8.0]
+  n_random_candidates: 36
+  n_refine_candidates: 24
+  refine_log_sigma: 0.25
+  multiplier_bounds:
+    smooth: [0.25, 8.0]
+    noise: [0.25, 8.0]
+    global: [0.25, 8.0]
+
+# Hard physical sanity limits. These prevent optimization from winning by
+# generating catastrophically destructive masks while remaining broad enough
+# to recover the original Lung_L NSR-QA ranges from the too-mild initial fit.
+parameter_limits:
+  smooth_mm: [0.5, 24.0]
+  noise_mm: [0.5, 16.0]
+  # The script may raise this lower bound to 1.05 * minimum voxel spacing.
+  global_mm: [0.5, 12.0]
+
+parallel:
+  workers: 0
+  candidate_workers: 4
+  validation_workers: 8
+
+# Independent seeds/draws after model selection. These are not reused during
+# candidate search and therefore give an honest Monte-Carlo check of the fit.
+validation_audit:
+  n_samples: 600
+
+example_bank:
+  patient_ids: []
+  n_patients: 5
+  severity_strata: [low, typical, high]
+  crop_margin_mm: 20.0
+
+output:
+  directory: /scratch/shaohan/contour_QA/lung_l_nsrqa_synthetic_severity_fit_v3_family_validated
+  recommended_experiment_name: dino_shape_stochastic_region_dropout_Lung_L_metric_fit_v3_family_validated

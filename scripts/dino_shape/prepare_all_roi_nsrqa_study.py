@@ -61,6 +61,7 @@ def benchmark_config(common, study_root, roi, dilation_vox):
         "experiment_name": f"dino_shape_benchmark_overlap_{roi}_allroi",
         "output_root": str(study_root / "models" / "benchmark_overlap"),
         "denoising": {
+            "corruption_backend": "gpu_torch",
             "clean_probability": 0.20, "two_corruption_probability": 0.30,
             "corruptions": {
                 "eroded": {"weight": 0.15, "voxels": [1, 5]},

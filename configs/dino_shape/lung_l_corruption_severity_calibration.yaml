@@ -1,0 +1,68 @@
+version: 1
+experiment_name: lung_l_corruption_severity_calibration_v1
+roi: Lung_L
+seed: 88
+
+# Calibration is intentionally restricted to the training partition generated
+# from Month1+Month2. Month3/testing1 is never used to choose corruption ranges.
+split_yaml: configs/dino_shape/month_temporal_nsrqa_split.yaml
+calibration_split: training1
+raw_data_root: /home/shaohan/radformation-data/data
+domain_csv: /home/shaohan/radformation-data/OOD_Domain_Assignment_MAD_TOTAL.csv
+site: thorax
+output_dir: /scratch/shaohan/contour_QA/lung_l_corruption_severity_calibration_v1
+
+geometry:
+  isotropic_spacing_mm: 1.5
+  crop_margin_mm: 60.0
+
+# Keep the historical corruption *types* fixed. The purpose of this analysis
+# is to calibrate their extent/severity to the current Lung_L training data.
+# Anatomical cut names are used here; historical cut_upper_half/lower_half are
+# audited but never used for new calibration.
+families:
+  shifted:
+    levels: [1, 2, 3, 4, 5, 6, 8, 10, 12]
+    repeats: 12
+  eroded:
+    levels: [1, 2, 3, 4, 5, 6, 8, 10]
+    repeats: 1
+  dilated:
+    levels: [1, 2, 3, 4, 5, 6, 8, 10]
+    repeats: 1
+  cut_inferior_portion:
+    levels: [0.02, 0.04, 0.06, 0.08, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50]
+    repeats: 1
+  cut_superior_portion:
+    levels: [0.02, 0.04, 0.06, 0.08, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50]
+    repeats: 1
+  cut_posterior_portion:
+    levels: [0.02, 0.04, 0.06, 0.08, 0.10, 0.15, 0.20, 0.30, 0.40, 0.50]
+    repeats: 1
+  big_bite:
+    levels: [0.05, 0.08, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50]
+    repeats: 12
+  big_blob:
+    levels: [0.05, 0.08, 0.10, 0.15, 0.20, 0.25, 0.30, 0.40, 0.50]
+    repeats: 12
+
+matching:
+  spatial_error_weight: 0.75
+  # RMS robust-z distance is combined with (1 - weighted error-mask Dice).
+  plausible_max_distance: 2.0
+  plausible_min_error_dice: 0.10
+  strong_max_distance: 1.0
+  strong_min_error_dice: 0.30
+  min_recommended_cases: 5
+  exclude_recorded_domains_from_recommendation: [H]
+
+synthetic_bank:
+  samples_per_patient: 32
+  classifier_folds: 5
+
+inspection:
+  export: true
+  # 0 means all training patients. CT is saved once per patient; each family
+  # stores only best/lower/upper synthetic masks, so the tree stays compact.
+  max_patients: 0
+  neighbor_levels: true

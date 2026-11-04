@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=supcorr_gate
+#SBATCH --partition=hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=10
+#SBATCH --mem=64G
+#SBATCH --time=04:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=shaohan@wustl.edu
+#SBATCH --output=%x_%j_log
+set -euo pipefail
+
+cd /home/shaohan/contour_qa_experiments
+ROI="${ROI:-Bronchus}"
+FOLD="${FOLD:-0}"
+MODEL_VERSION="${MODEL_VERSION:-v6}"
+SPLIT="${SPLIT:-validation}"
+LOCAL_RADIUS="${LOCAL_RADIUS:-6}"
+
+bash scripts/dino_shape/run_supervised_correction_patient_gating_diagnostic.sh \
+  "${ROI}" "${FOLD}" "${MODEL_VERSION}" "${SPLIT}"

@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=supcorr_foldact
+#SBATCH --partition=hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=10
+#SBATCH --mem=64G
+#SBATCH --time=04:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=shaohan@wustl.edu
+#SBATCH --output=%x_%j_log
+set -euo pipefail
+
+cd /home/shaohan/contour_qa_experiments
+ROI="${ROI:-Lung_L}"
+FOLD="${FOLD:-0}"
+VARIANT="${VARIANT:-large_decoder_ft_last2}"
+LOCAL_RADIUS="${LOCAL_RADIUS:-6}"
+FORCE_ACTION_DIAG="${FORCE_ACTION_DIAG:-0}"
+
+LOCAL_RADIUS="${LOCAL_RADIUS}" FORCE_ACTION_DIAG="${FORCE_ACTION_DIAG}" \
+  bash scripts/dino_shape/run_supervised_correction_fold_action_quality_diagnostic.sh \
+  "${ROI}" "${FOLD}" "${VARIANT}"

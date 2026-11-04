@@ -25,7 +25,8 @@ import yaml
 from torch.utils.data import DataLoader, Dataset
 
 from models.dino_shape.dino_shape_autoencoder import Frozen3DINOShapeAutoencoder
-from evaluation.probes.eval_dino_shape_probe_sweep_assd import make_corruption
+from evaluation.probes.eval_dino_shape_probe_sweep_assd import make_corruption as make_corruption_legacy
+from training.corruptions.benchmark_gpu import make_corruption_gpu
 
 
 def parse_args():
@@ -92,9 +93,13 @@ def sample_probe(cfg: Dict, rng: random.Random) -> Tuple[str, float]:
     return probe, float(level)
 
 
+@torch.no_grad()
 def corrupt_batch(target: torch.Tensor, patient_ids: Sequence[str], cfg: Dict,
                   train: bool, epoch: int, step: int) -> Tuple[torch.Tensor, torch.Tensor]:
     den = cfg["denoising"]
+    backend = str(den.get("corruption_backend", "gpu_torch")).lower()
+    if backend not in {"gpu_torch", "legacy_sitk"}:
+        raise ValueError(f"Unknown denoising.corruption_backend={backend!r}; expected gpu_torch or legacy_sitk")
     base_seed = int(cfg.get("seed", 88))
     clean_probability = float(den.get("clean_probability", 0.20))
     two_probability = float(den.get("two_corruption_probability", 0.30))
@@ -112,7 +117,10 @@ def corrupt_batch(target: torch.Tensor, patient_ids: Sequence[str], cfg: Dict,
             count = 2 if rng.random() < two_probability else 1
             for _ in range(count):
                 probe, level = sample_probe(cfg, rng)
-                x, _ = make_corruption(x, probe, level, rng)
+                if backend == "gpu_torch":
+                    x, _ = make_corruption_gpu(x, probe, level, rng)
+                else:
+                    x, _ = make_corruption_legacy(x, probe, level, rng)
         outputs.append(x)
         changed.append((x != clean_i).float())
 
@@ -221,6 +229,7 @@ def main():
     with open(args.config, "r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     seed_all(int(cfg.get("seed", 88)))
+    cfg.setdefault("denoising", {}).setdefault("corruption_backend", "gpu_torch")
 
     experiment_dir = Path(cfg["output_root"]) / cfg["experiment_name"]
     ckpt_dir = experiment_dir / "checkpoints"
@@ -255,6 +264,7 @@ def main():
     print(f"Train/validation cases: {len(train_ds)}/{len(val_ds)}")
     print(f"Frozen encoder params: {sum(p.numel() for p in model.encoder.parameters()):,}")
     print(f"Trainable decoder params: {sum(p.numel() for p in model.decoder.parameters() if p.requires_grad):,}")
+    print(f"Benchmark corruption backend: {cfg['denoising']['corruption_backend']} on {device}")
 
     history_path = log_dir / "history.csv"
     fields = ["epoch"] + [f"train_{k}" for k in run_epoch.__annotations__ if False]  # placeholder removed below

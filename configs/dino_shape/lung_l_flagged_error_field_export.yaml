@@ -1,0 +1,21 @@
+version: 1
+
+# Produced by analysis.flag_lung_l_abnormal_inspection_cases.
+flags_csv: /scratch/shaohan/contour_QA/lung_l_abnormal_approved_autoseg_inspection/inspection_union.csv
+
+# Reuse exactly the geometry, smoothing, component, and display-threshold
+# settings from the direct Lung_L error-field characterization.
+error_field_config: configs/dino_shape/lung_l_error_field_characterization.yaml
+
+# Optional manual review cases are exported in addition to the statistical
+# inspection union. They are tagged as manual_include and do not alter flags.
+manual_include_patients: [53]
+
+# Point LungErrorFieldViewer.py directly to this directory. It will contain
+# patient_<id>/ folders for every flagged Month1/Month2/Month3 case plus the
+# manually included patients above.
+output_dir: /scratch/shaohan/contour_QA/lung_l_abnormal_approved_autoseg_inspection/error_field_viewer_cases
+
+# 0 => use SLURM_CPUS_PER_TASK. Parallelism is by patient.
+workers: 0
+overwrite: false

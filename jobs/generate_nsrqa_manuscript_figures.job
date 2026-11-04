@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=nsrqa_figures
+#SBATCH --partition=hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16G
+#SBATCH --time=01:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=shaohan@wustl.edu
+#SBATCH --output=nsrqa_figures_%j_log
+
+set -euo pipefail
+PROJECT_ROOT="${PROJECT_ROOT:-/home/shaohan/contour_qa_experiments}"
+cd "${PROJECT_ROOT}"
+bash scripts/dino_shape/run_generate_nsrqa_manuscript_figures.sh

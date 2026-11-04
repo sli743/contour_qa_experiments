@@ -1,0 +1,112 @@
+version: 4
+sampler_version: spinalcord_proposed_v4_endpoint_gap_excess_nocache
+sampling_strategy: compositional_v4
+seed: 88
+
+# Candidate only: validate on Month1+Month2 before any NSR-QA training.
+# V4 keeps the v3 surface model and changes only the endpoint support plus the
+# local-bite cache behavior exposed by the inspection/replay audit.
+clean_probability: 0.20
+
+surface_mode_probabilities:
+  smooth_warp: 0.35
+  warp_plus_micro_jitter: 0.40
+  micro_jitter: 0.25
+
+smooth_warp:
+  control_grid_points_zyx: {min: [4, 4, 4], max: [7, 7, 7]}
+  gaussian_sigma_vox: [4.0, 9.0]
+  amplitude_mm: {min: 2.0, max: 6.0, mode: 4.0}
+  upsample_order: 1
+
+micro_jitter:
+  amplitude_mm: {min: 0.8, max: 2.0, mode: 1.25}
+  outward_bias_mm: {min: 0.25, max: 0.90, mode: 0.50}
+  sigma_z_vox: [0.75, 2.50]
+  sigma_yx_vox: [0.75, 1.75]
+  clip_standard_deviations: 2.5
+
+warp_plus_micro_jitter:
+  smooth_warp:
+    control_grid_points_zyx: {min: [4, 4, 4], max: [7, 7, 7]}
+    gaussian_sigma_vox: [4.0, 9.0]
+    amplitude_mm: {min: 2.0, max: 5.0, mode: 3.5}
+    upsample_order: 1
+  micro_jitter:
+    amplitude_mm: {min: 0.6, max: 1.6, mode: 1.0}
+    outward_bias_mm: {min: 0.20, max: 0.70, mode: 0.40}
+    sigma_z_vox: [0.75, 2.00]
+    sigma_yx_vox: [0.75, 1.75]
+    clip_standard_deviations: 2.5
+
+# Endpoint policy derived only from Month1+Month2 development data.
+#
+# V3 had a hard support gap: inferior truncation was either 1.5-3 mm or
+# >=~27 mm.  Real development data contain 3/66 cases in the 3-20 mm region,
+# so V4 adds a sparse moderate branch covering the next 1.5-mm-grid value
+# (4.5 mm) through 20 mm.  V3 also had no explicit S/I over-extension.  V4
+# adds rare endpoint-excess events at the observed development prevalences.
+# The single inferior-excess development case is ~39 mm; with n=1 we use a
+# conservative 30-40 mm uniform support rather than fit a distribution.
+# Superior excess occurs in 4/66 cases, 3/66 >3 mm and none >10 mm, so the
+# support is kept broad but bounded to 1.5-9 mm.
+endpoint_v4:
+  severe_inferior_probability_model:
+    intercept: -8.2152121173
+    slope_per_mm: 0.0194447053
+    development_prevalence: 0.2575757576
+    raw_weight: 0.75
+    min_unconditional_probability: 0.04
+    max_unconditional_probability: 0.55
+
+  mild_inferior_unconditional_probability: 0.13
+  moderate_inferior_unconditional_probability: 0.0454545455   # 3/66
+  superior_mild_unconditional_probability: 0.07
+  inferior_excess_unconditional_probability: 0.0151515152     # 1/66
+  superior_excess_unconditional_probability: 0.0606060606     # 4/66
+
+  severe_inferior_fraction_of_gt_length:
+    min: 0.073
+    max: 0.131
+    mode: 0.090
+  severe_inferior_absolute_length_mm: [27.0, 50.0]
+  mild_inferior_length_mm: [1.5, 3.0]
+  moderate_inferior_length_mm: [4.5, 20.0]
+  superior_length_mm: [1.5, 3.0]
+  inferior_excess_length_mm: [30.0, 40.0]
+  superior_excess_length_mm: [1.5, 9.0]
+
+# Same nominal local-bite frequency/spec as v3.  In compositional_v4 the
+# patient-level geometry cache is deliberately disabled because the input to
+# local bite has already been changed by surface/endpoint corruption.
+local_bite_probability: 0.05
+local_bite:
+  coarse_grid_points_zyx: {min: [4, 4, 4], max: [7, 7, 7]}
+  correlation_length_mm: [6.0, 16.0]
+  localization_sigma_mm: [6.0, 18.0]
+  random_field_weight: 1.0
+  localization_weight: 1.5
+  localization_cutoff_sigma: 3.5
+  upsample_order: 1
+  threshold_search_steps: 8
+  removed_fraction: [0.005, 0.05]
+  removed_fraction_tolerance: 0.025
+  min_max_depth_mm: 1.0
+  max_max_depth_mm: 10.0
+  max_extra_remaining_components: 3
+  max_attempts: 10
+  endpoint_guard_attempts: 6
+
+analysis:
+  coverage_percentile: 95.0
+  classifier_repeats: 30
+  classifier_folds: 5
+  classifier_rf_repeats: 10
+  mixture_search_draws: 2500
+  mixture_search_seed: 188
+  joint_pairs:
+    - [hd95_mm, missing_fraction_gt]
+    - [assd_mm, hd95_mm]
+    - [inferior_missing_mm, missing_fraction_gt]
+    - [signed_surface_p05_mm, signed_surface_p95_mm]
+    - [largest_missing_component_fraction, missing_fraction_gt]

@@ -1,0 +1,68 @@
+version: 1
+experiment_name: lung_l_nsrqa_severity_calibration_v1
+seed: 91
+
+# Previous-generation Lung_L NSR-QA experiment. The calibration script copies
+# its corruption vocabulary, clean probability, branch probabilities and all
+# spatial correlation/localization settings unchanged, then replaces only the
+# severity ranges listed below.
+base_training_config: configs/dino_shape/dino_shape_stochastic_region_dropout_Lung_L_v3_symmetric_changed_loss.yaml
+
+# Produced by analysis/characterize_lung_error_fields.py. That analysis uses
+# training1 only; Month3/testing1 is not part of severity calibration.
+error_field_root: /scratch/shaohan/contour_QA/lung_l_error_field_characterization_v1
+
+data:
+  train_label_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/lungs_chest/Lung_L/training1/lungs_chest/Lung_L/labels
+  train_ct_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/lungs_chest/Lung_L/training1/lungs_chest/Lung_L/ct
+
+calibration:
+  minimum_cases: 12
+  # Leave empty for the first all-current-data calibration. If visual review
+  # identifies approved contours whose anatomy/annotation should not define a
+  # normal segmentation-error distribution, list them here and rerun.
+  exclude_patient_ids: []
+
+  # Subvoxel amplitudes often produce unchanged 1.5-mm binary masks. Keep a
+  # small physical floor but let the exact-sampler audit reveal whether the
+  # proposed low end is still ineffective.
+  minimum_effective_mm: 0.75
+  maximum_allowed_mm: 20.0
+
+  # standardized Gaussian |Z| 95th percentile ~= 1.96
+  distance_noise_abs_p95_factor: 1.96
+
+  # Global offsets should represent broad, predominantly one-sided errors,
+  # not local bites/blobs.
+  global_offset_min_one_sided_fraction: 0.65
+  global_offset_min_smooth_energy: 0.50
+  global_offset_min_cases: 5
+
+  # Stochastic dropout is calibrated from the largest significant real missing
+  # component in each case when enough such components exist.
+  dropout_min_patch_cases: 5
+  dropout_min_removed_fraction: 0.005
+  dropout_max_removed_fraction: 0.40
+  dropout_min_depth_floor_mm: 1.5
+  dropout_max_depth_ceiling_mm: 60.0
+
+parallel:
+  workers: 0
+  max_workers: 8
+
+# Exact current sampler with the proposed severity config. Metrics are saved
+# for all draws; the masks are not saved to avoid a large audit directory.
+audit_bank:
+  n_samples: 240
+
+# Small image bank for direct Slicer inspection. Patients are selected across
+# approved Lung_L volume unless patient_ids is explicitly populated.
+example_bank:
+  patient_ids: []
+  n_patients: 5
+  severity_strata: [low, typical, high]
+  crop_margin_mm: 20.0
+
+output:
+  directory: /scratch/shaohan/contour_QA/lung_l_nsrqa_severity_calibration_v1
+  recommended_experiment_name: dino_shape_stochastic_region_dropout_Lung_L_data_calibrated_v1

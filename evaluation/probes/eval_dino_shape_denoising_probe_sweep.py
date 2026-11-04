@@ -262,8 +262,16 @@ def preprocess_clean_target(x_target: torch.Tensor, cf: Dict) -> torch.Tensor:
 
 
 @torch.no_grad()
-def reconstruct_binary(model: torch.nn.Module, x_in: torch.Tensor, cf: Dict, threshold: float) -> torch.Tensor:
-    return model.reconstruct(x_in, threshold=float(threshold))
+def reconstruct_binary(
+    model: torch.nn.Module,
+    x_in: torch.Tensor,
+    cf: Dict,
+    threshold: float,
+    spatial_context: torch.Tensor | None = None,
+) -> torch.Tensor:
+    return model.reconstruct(
+        x_in, threshold=float(threshold), spatial_context=spatial_context
+    )
 
 
 # -----------------------------

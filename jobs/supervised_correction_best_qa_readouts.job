@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=supcorr_bestqa
+#SBATCH --partition=hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=10
+#SBATCH --mem=64G
+#SBATCH --time=24:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=shaohan@wustl.edu
+#SBATCH --output=%x_%j_log
+set -euo pipefail
+cd /home/shaohan/contour_qa_experiments
+ROI="${ROI:-Lung_L}"
+FOLD="${FOLD:-0}"
+VARIANT="${VARIANT:-large_decoder_ft_last2}"
+FORCE_READOUTS="${FORCE_READOUTS:-0}"
+export FORCE_READOUTS
+bash scripts/dino_shape/run_supervised_correction_best_qa_readouts.sh \
+  "${ROI}" "${FOLD}" "${VARIANT}"

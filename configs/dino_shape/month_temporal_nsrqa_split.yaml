@@ -1,0 +1,188 @@
+version: 1
+study_name: all_roi_NSRQA_month_temporal_v1
+study_root: /scratch/shaohan/contour_QA/all_roi_NSRQA_month_temporal_study
+source_data_root: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom
+registry: configs/dino_shape/all_roi_nsrqa_registry.yaml
+seed: 88
+validation_fraction: 0.20
+validation_strategy: stratified_by_month
+# A patient present in month3 is always held out for testing, even if that ID
+# also appears in month1/month2. This prevents patient leakage.
+overlap_policy: month3_test_priority
+
+# Match the August-13 study exactly: the uploaded reference configs contain
+# 16 ROIs x 4 models. NS_Chestwall was not part of that completed experiment.
+reference_active_rois:
+  - Bronchus
+  - Carina
+  - Trachea
+  - BrachPlx_L
+  - BrachPlx_R
+  - A_Aorta
+  - A_Pulmonary
+  - Heart
+  - Lung_L
+  - Lung_R
+  - Ribs
+  - Esophagus
+  - V_VenaCava_S
+  - SpinalCord
+  - Liver
+  - Stomach
+month1:
+  - 14
+  - 87
+  - 151
+  - 44
+  - 74
+  - 166
+  - 43
+  - 59
+  - 10
+  - 128
+  - 122
+  - 18
+  - 23
+  - 165
+  - 89
+  - 16
+  - 37
+  - 53
+  - 167
+  - 61
+  - 51
+  - 125
+  - 82
+  - 55
+  - 52
+  - 45
+  - 27
+  - 94
+  - 134
+  - 127
+  - 71
+  - 143
+  - 17
+  - 162
+  - 79
+  - 102
+  - 120
+  - 31
+  - 54
+  - 142
+month2:
+  - 92
+  - 80
+  - 38
+  - 36
+  - 41
+  - 69
+  - 88
+  - 28
+  - 2
+  - 70
+  - 58
+  - 13
+  - 85
+  - 11
+  - 159
+  - 124
+  - 104
+  - 7
+  - 108
+  - 81
+  - 57
+  - 149
+  - 56
+  - 21
+  - 46
+  - 86
+  - 65
+  - 4
+  - 84
+  - 75
+  - 66
+  - 107
+  - 141
+  - 72
+  - 32
+  - 150
+  - 60
+  - 24
+  - 161
+  - 3
+  - 111
+  - 29
+  - 130
+  - 137
+month3:
+  - 95
+  - 148
+  - 154
+  - 76
+  - 77
+  - 164
+  - 109
+  - 48
+  - 30
+  - 101
+  - 135
+  - 136
+  - 39
+  - 152
+  - 115
+  - 20
+  - 90
+  - 83
+  - 145
+  - 168
+  - 99
+  - 16
+  - 106
+  - 15
+  - 113
+  - 129
+  - 114
+  - 139
+  - 33
+  - 49
+  - 42
+  - 116
+  - 47
+  - 112
+  - 158
+  - 40
+  - 118
+  - 12
+  - 63
+  - 133
+  - 1
+  - 34
+  - 78
+  - 19
+  - 93
+  - 156
+  - 110
+  - 68
+  - 144
+  - 157
+  - 62
+  - 73
+  - 131
+  - 155
+  - 26
+  - 163
+  - 9
+  - 97
+  - 91
+  - 105
+  - 153
+  - 103
+  - 35
+  - 123
+  - 146
+  - 100
+  - 117
+  - 138
+  - 160
+  - 150

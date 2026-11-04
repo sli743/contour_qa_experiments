@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=lungL_month_post
+#SBATCH --partition=hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16G
+#SBATCH --time=02:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=shaohan@wustl.edu
+set -euo pipefail
+PROJECT_ROOT="${PROJECT_ROOT:-/home/shaohan/contour_qa_experiments}"
+STUDY_ROOT="${STUDY_ROOT:-/scratch/shaohan/contour_QA/lung_l_nsrqa_corruption_ablation_month_temporal_v1}"
+cd "${PROJECT_ROOT}"
+source "${PROJECT_ROOT}/scripts/dino_shape/activate_3dino_env.sh"
+python -m analysis.compare_lung_l_nsrqa_corruption_ablation --study-root "${STUDY_ROOT}"

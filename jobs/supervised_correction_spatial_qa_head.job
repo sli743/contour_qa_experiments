@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=supcorr_spatialqa
+#SBATCH --partition=hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=10
+#SBATCH --mem=64G
+#SBATCH --time=08:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=shaohan@wustl.edu
+#SBATCH --output=%x_%j_log
+set -euo pipefail
+cd /home/shaohan/contour_qa_experiments
+ROI="${ROI:-Lung_L}"
+FOLD="${FOLD:-0}"
+VARIANT="${VARIANT:-large_decoder_ft_last2}"
+bash scripts/dino_shape/run_supervised_correction_spatial_qa_head.sh \
+  "${ROI}" "${FOLD}" "${VARIANT}"

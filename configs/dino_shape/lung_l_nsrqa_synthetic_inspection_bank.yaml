@@ -1,0 +1,38 @@
+version: 1
+seed: 91
+
+# Output from the additive family-validated severity fitter.
+calibration_output_dir: /scratch/shaohan/contour_QA/lung_l_nsrqa_synthetic_severity_fit_v3_family_validated
+validated_config_name: best_fit_training_config.yaml
+candidate_config_name: best_candidate_training_config.yaml
+
+# The candidate may be exported for visual inspection even if the hard family
+# validity audit has not passed. The report labels it explicitly as unvalidated.
+allow_unvalidated_candidate_for_inspection: true
+
+error_field_root: /scratch/shaohan/contour_QA/lung_l_error_field_characterization_v1
+
+data:
+  train_label_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/lungs_chest/Lung_L/training1/lungs_chest/Lung_L/labels
+  train_ct_dir: /home/shaohan/radformation-data/preprocessed_roiwise_allrois_1p5mm_nozoom/lungs_chest/Lung_L/training1/lungs_chest/Lung_L/ct
+
+selection:
+  # Leave empty to choose patients spanning the approved Lung_L volume range.
+  patient_ids: []
+  n_patients: 5
+
+# Compatible with TrainingCorruptionExampleViewer. Each selected patient gets
+# forced examples for smooth warp, distance noise, combined, stochastic regional
+# dropout, and inward/outward global boundary offset.
+forced_bank:
+  severity_strata: [low, typical, high]
+
+# These are sampled through the exact training corruption entry point and retain
+# the intentional 20% clean probability and fixed NSR-QA branch probabilities.
+mixture_bank:
+  samples_per_patient: 8
+
+crop_margin_mm: 20.0
+
+output:
+  directory: /scratch/shaohan/contour_QA/lung_l_nsrqa_synthetic_inspection_bank_v1

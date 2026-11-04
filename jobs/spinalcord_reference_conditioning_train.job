@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=spcord_reftrain
+#SBATCH --partition=hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --array=0-3
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=10
+#SBATCH --mem=64G
+#SBATCH --time=2-00:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=shaohan@wustl.edu
+#SBATCH --output=slurm-%x-%A_%a.out
+#SBATCH --error=slurm-%x-%A_%a.err
+
+set -euo pipefail
+PROJECT_ROOT="${PROJECT_ROOT:-/home/shaohan/contour_qa_experiments}"
+REFERENCE_ROOT="${REFERENCE_ROOT:-/scratch/shaohan/contour_QA/spinalcord_large_fov_month_temporal_NSRQA_reference_ablation}"
+FRESH_TRAINING="${FRESH_TRAINING:-0}"
+cd "${PROJECT_ROOT}"
+source "${PROJECT_ROOT}/scripts/dino_shape/activate_3dino_env.sh"
+export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
+unset PYTORCH_CUDA_ALLOC_CONF || true
+
+manifest="${REFERENCE_ROOT}/manifests/model_configs.tsv"
+[[ -s "${manifest}" ]] || { echo "Missing model manifest: ${manifest}" >&2; exit 2; }
+row="$(awk -F '\t' -v idx="${SLURM_ARRAY_TASK_ID}" 'NR>1 && $1==idx {gsub(/\r/, ""); print; exit}' "${manifest}")"
+[[ -n "${row}" ]] || { echo "No model row for arm index ${SLURM_ARRAY_TASK_ID}" >&2; exit 2; }
+IFS=$'\t' read -r arm_index arm model_key model_label use_context use_jitter config checkpoint <<< "${row}"
+[[ -s "${config}" ]] || { echo "Missing config: ${config}" >&2; exit 2; }
+mkdir -p "${REFERENCE_ROOT}/logs"
+
+echo "Training arm ${arm_index}: ${arm} context=${use_context} jitter=${use_jitter}"
+complete_marker="${checkpoint}.training_complete"
+if [[ "${FRESH_TRAINING}" == "1" ]]; then
+  rm -f "${complete_marker}"
+  python -m training.train_dino_shape_stochastic_region_dropout_decoder --config "${config}" --fresh
+elif [[ -s "${complete_marker}" && -s "${checkpoint}" ]]; then
+  echo "Completed checkpoint already exists; reusing: ${checkpoint}"
+else
+  # A best checkpoint can exist after an interrupted run.  --resume auto uses
+  # last_decoder.pth, so do not mistake best_decoder.pth for completion.
+  python -m training.train_dino_shape_stochastic_region_dropout_decoder --config "${config}" --resume auto
+fi
+[[ -s "${checkpoint}" ]] || { echo "Training did not produce checkpoint: ${checkpoint}" >&2; exit 2; }
+touch "${complete_marker}"

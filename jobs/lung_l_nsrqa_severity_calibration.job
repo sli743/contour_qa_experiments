@@ -1,0 +1,29 @@
+#!/bin/bash
+#SBATCH -J lungL_sevcal
+#SBATCH -p hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=64G
+#SBATCH --time=08:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=shaohan@wustl.edu
+#SBATCH -o slurm-lungL-sevcal-%j.out
+#SBATCH -e slurm-lungL-sevcal-%j.err
+
+set -euo pipefail
+
+REPO="${REPO:-/home/shaohan/contour_qa_experiments}"
+cd "$REPO"
+
+if command -v conda >/dev/null 2>&1; then
+  source "$(conda info --base)/etc/profile.d/conda.sh"
+  conda activate "${CONDA_ENV:-3DINO}"
+fi
+
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS=1
+
+python -m analysis.calibrate_lung_l_nsrqa_severity \
+  --config configs/dino_shape/lung_l_nsrqa_severity_calibration.yaml

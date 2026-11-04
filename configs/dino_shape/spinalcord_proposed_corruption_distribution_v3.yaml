@@ -1,0 +1,100 @@
+version: 3
+sampler_version: spinalcord_proposed_v3_length_conditioned_microjitter
+sampling_strategy: compositional_v3
+seed: 88
+
+# Candidate only: validate on Month1+Month2 before any NSR-QA training.
+clean_probability: 0.20
+
+# Every non-clean sample receives a surface perturbation. V3 increases exposure
+# to short-correlation micro-jitter while retaining smooth deformation.
+surface_mode_probabilities:
+  smooth_warp: 0.35
+  warp_plus_micro_jitter: 0.40
+  micro_jitter: 0.25
+
+smooth_warp:
+  control_grid_points_zyx: {min: [4, 4, 4], max: [7, 7, 7]}
+  gaussian_sigma_vox: [4.0, 9.0]
+  amplitude_mm: {min: 2.0, max: 6.0, mode: 4.0}
+  upsample_order: 1
+
+# Short-z correlated boundary jitter. A modest positive displacement bias is
+# intentional: non-severe real development errors show more excess than
+# missing volume. The operation remains transverse and preserves S/I support.
+micro_jitter:
+  amplitude_mm: {min: 0.8, max: 2.0, mode: 1.25}
+  outward_bias_mm: {min: 0.25, max: 0.90, mode: 0.50}
+  sigma_z_vox: [0.75, 2.50]
+  sigma_yx_vox: [0.75, 1.75]
+  clip_standard_deviations: 2.5
+
+warp_plus_micro_jitter:
+  smooth_warp:
+    control_grid_points_zyx: {min: [4, 4, 4], max: [7, 7, 7]}
+    gaussian_sigma_vox: [4.0, 9.0]
+    amplitude_mm: {min: 2.0, max: 5.0, mode: 3.5}
+    upsample_order: 1
+  micro_jitter:
+    amplitude_mm: {min: 0.6, max: 1.6, mode: 1.0}
+    outward_bias_mm: {min: 0.20, max: 0.70, mode: 0.40}
+    sigma_z_vox: [0.75, 2.00]
+    sigma_yx_vox: [0.75, 1.75]
+    clip_standard_deviations: 2.5
+
+# V3 endpoint policy is fitted only from Month1+Month2 development data.
+# The logistic model predicts P(real inferior missing >20 mm | approved S/I
+# length). The raw probability is shrunk toward the development prevalence to
+# reduce overfitting at n=66, then interpreted as an unconditional target
+# probability across all samples. Conditional probabilities among non-clean
+# samples account for the 20% clean fraction.
+endpoint_v3:
+  severe_inferior_probability_model:
+    intercept: -8.2152121173
+    slope_per_mm: 0.0194447053
+    development_prevalence: 0.2575757576
+    raw_weight: 0.75
+    min_unconditional_probability: 0.04
+    max_unconditional_probability: 0.55
+  mild_inferior_unconditional_probability: 0.13
+  superior_mild_unconditional_probability: 0.07
+  severe_inferior_fraction_of_gt_length:
+    min: 0.073
+    max: 0.131
+    mode: 0.090
+  severe_inferior_absolute_length_mm: [27.0, 50.0]
+  mild_inferior_length_mm: [1.5, 3.0]
+  superior_length_mm: [1.5, 3.0]
+
+# Rare independent local missing defect, unchanged from v2.
+local_bite_probability: 0.05
+local_bite:
+  coarse_grid_points_zyx: {min: [4, 4, 4], max: [7, 7, 7]}
+  correlation_length_mm: [6.0, 16.0]
+  localization_sigma_mm: [6.0, 18.0]
+  random_field_weight: 1.0
+  localization_weight: 1.5
+  localization_cutoff_sigma: 3.5
+  upsample_order: 1
+  threshold_search_steps: 8
+  removed_fraction: [0.005, 0.05]
+  removed_fraction_tolerance: 0.025
+  min_max_depth_mm: 1.0
+  max_max_depth_mm: 10.0
+  max_extra_remaining_components: 3
+  max_attempts: 10
+  endpoint_guard_attempts: 6
+
+analysis:
+  coverage_percentile: 95.0
+  classifier_repeats: 30
+  classifier_folds: 5
+  classifier_rf_repeats: 10
+  mixture_search_draws: 2500
+  mixture_search_seed: 188
+  joint_pairs:
+    - [hd95_mm, missing_fraction_gt]
+    - [assd_mm, hd95_mm]
+    - [inferior_missing_mm, missing_fraction_gt]
+    - [signed_surface_p05_mm, signed_surface_p95_mm]
+    - [largest_missing_component_fraction, missing_fraction_gt]

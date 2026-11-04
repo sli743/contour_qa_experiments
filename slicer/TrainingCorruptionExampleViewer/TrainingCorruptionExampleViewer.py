@@ -100,18 +100,22 @@ class TrainingCorruptionExampleViewerWidget(ScriptedLoadableModuleWidget):
 
         self.primaryChecks = {}
         for key, label, _pattern, color in CONTOUR_SPECS:
-            cb = qt.QCheckBox()
-            cb.checked = True
+            cb = self._colorCheckBox(label, color, checked=True)
             self.primaryChecks[key] = cb
-            visForm.addRow(self._colorLabel(label, color), cb)
+            visForm.addRow(cb)
 
-        self.opacitySlider = ctk.ctkSliderWidget()
-        self.opacitySlider.minimum = 0.0
-        self.opacitySlider.maximum = 1.0
-        self.opacitySlider.singleStep = 0.05
-        self.opacitySlider.value = 0.35
-        self.opacitySlider.decimals = 2
-        visForm.addRow("2D fill opacity:", self.opacitySlider)
+        opacityRow = qt.QHBoxLayout()
+        self.opacitySlider = qt.QSlider(qt.Qt.Horizontal)
+        self.opacitySlider.minimum = 0
+        self.opacitySlider.maximum = 100
+        self.opacitySlider.singleStep = 1
+        self.opacitySlider.pageStep = 5
+        self.opacitySlider.value = 35
+        self.opacityValueLabel = qt.QLabel("35%")
+        self.opacityValueLabel.minimumWidth = 42
+        opacityRow.addWidget(self.opacitySlider, 1)
+        opacityRow.addWidget(self.opacityValueLabel)
+        visForm.addRow("2D fill opacity:", opacityRow)
 
         self.outlineThicknessSlider = ctk.ctkSliderWidget()
         self.outlineThicknessSlider.minimum = 1
@@ -148,10 +152,9 @@ class TrainingCorruptionExampleViewerWidget(ScriptedLoadableModuleWidget):
 
         self.auxChecks = {}
         for key, label, _pattern, color in AUX_SPECS:
-            cb = qt.QCheckBox()
-            cb.checked = True
+            cb = self._colorCheckBox(label, color, checked=True)
             self.auxChecks[key] = cb
-            auxForm.addRow(self._colorLabel(label, color), cb)
+            auxForm.addRow(cb)
 
         self.statusLabel = qt.QLabel("Select the examples root and scan.")
         self.statusLabel.wordWrap = True
@@ -164,7 +167,7 @@ class TrainingCorruptionExampleViewerWidget(ScriptedLoadableModuleWidget):
         self.clearButton.connect("clicked()", self.clearLoadedNodes)
         self.showCTCheckBox.connect("toggled(bool)", self.updateVisibility)
         self.show3DCheckBox.connect("toggled(bool)", self.updateVisibility)
-        self.opacitySlider.connect("valueChanged(double)", self.updateVisibility)
+        self.opacitySlider.connect("valueChanged(int)", self.updateVisibility)
         self.outlineThicknessSlider.connect("valueChanged(double)", self.updateVisibility)
         self.fitViewsButton.connect("clicked()", self.fitViews)
         self.loadAuxButton.connect("clicked()", self.onLoadAux)
@@ -181,14 +184,16 @@ class TrainingCorruptionExampleViewerWidget(ScriptedLoadableModuleWidget):
         self.clearLoadedNodes()
 
     @staticmethod
-    def _colorLabel(text, color):
+    def _colorCheckBox(text, color, checked=False):
         r, g, b = [int(round(c * 255)) for c in color]
-        label = qt.QLabel(text)
-        label.setStyleSheet(
-            "QLabel { font-weight: 600; "
+        cb = qt.QCheckBox(text)
+        cb.checked = bool(checked)
+        cb.setStyleSheet(
+            "QCheckBox { font-weight: 600; "
             f"color: rgb({r},{g},{b}); }}"
         )
-        return label
+        cb.setToolTip(f"Contour color: RGB({r}, {g}, {b})")
+        return cb
 
     def onScan(self):
         root = Path(self.directoryButton.currentPath)
@@ -274,7 +279,8 @@ class TrainingCorruptionExampleViewerWidget(ScriptedLoadableModuleWidget):
             display.SetVisibility(True)
             display.SetVisibility2D(True)
             display.SetVisibility3D(bool(self.show3DCheckBox.checked))
-            fillOpacity = float(self.opacitySlider.value)
+            fillOpacity = max(0.0, min(1.0, float(self.opacitySlider.value) / 100.0))
+            self.opacityValueLabel.text = f"{int(self.opacitySlider.value)}%"
             outlineThickness = max(1, int(round(float(self.outlineThicknessSlider.value))))
             try:
                 display.SetSliceIntersectionThickness(outlineThickness)
@@ -284,6 +290,8 @@ class TrainingCorruptionExampleViewerWidget(ScriptedLoadableModuleWidget):
                 visible = bool(self.primaryChecks[key].checked)
                 display.SetSegmentVisibility(segId, visible)
                 try:
+                    display.SetSegmentVisibility2DFill(segId, visible)
+                    display.SetSegmentVisibility2DOutline(segId, visible)
                     display.SetSegmentOpacity2DFill(segId, fillOpacity)
                     display.SetSegmentOpacity2DOutline(segId, 1.0)
                     display.SetSegmentOpacity3D(segId, 0.55)
@@ -296,6 +304,7 @@ class TrainingCorruptionExampleViewerWidget(ScriptedLoadableModuleWidget):
             display.SetVisibility(True)
             display.SetVisibility2D(True)
             display.SetVisibility3D(bool(self.show3DCheckBox.checked))
+            fillOpacity = max(0.0, min(1.0, float(self.opacitySlider.value) / 100.0))
             outlineThickness = max(1, int(round(float(self.outlineThicknessSlider.value))))
             try:
                 display.SetSliceIntersectionThickness(outlineThickness)
@@ -305,7 +314,9 @@ class TrainingCorruptionExampleViewerWidget(ScriptedLoadableModuleWidget):
                 visible = bool(self.auxChecks[key].checked)
                 display.SetSegmentVisibility(segId, visible)
                 try:
-                    display.SetSegmentOpacity2DFill(segId, 0.25)
+                    display.SetSegmentVisibility2DFill(segId, visible)
+                    display.SetSegmentVisibility2DOutline(segId, visible)
+                    display.SetSegmentOpacity2DFill(segId, fillOpacity)
                     display.SetSegmentOpacity2DOutline(segId, 1.0)
                     display.SetSegmentOpacity3D(segId, 0.4)
                 except Exception:
@@ -383,20 +394,26 @@ class TrainingCorruptionExampleViewerLogic(ScriptedLoadableModuleLogic):
         if not labelNode:
             raise RuntimeError(f"Could not load labelmap: {path}")
         try:
-            before = {
-                segmentationNode.GetSegmentation().GetNthSegmentID(i)
-                for i in range(segmentationNode.GetSegmentation().GetNumberOfSegments())
-            }
+            segmentation = segmentationNode.GetSegmentation()
+            before = {segmentation.GetNthSegmentID(i) for i in range(segmentation.GetNumberOfSegments())}
+            try:
+                isEmpty = not bool(slicer.util.arrayFromVolume(labelNode).any())
+            except Exception:
+                isEmpty = False
             if referenceNode is not None:
                 segmentationNode.SetReferenceImageGeometryParameterFromVolumeNode(referenceNode)
             slicer.modules.segmentations.logic().ImportLabelmapToSegmentationNode(labelNode, segmentationNode)
-            segmentation = segmentationNode.GetSegmentation()
             after = [segmentation.GetNthSegmentID(i) for i in range(segmentation.GetNumberOfSegments())]
             newIds = [sid for sid in after if sid not in before]
             if not newIds:
-                raise RuntimeError(f"No foreground segment imported from {path}")
+                if isEmpty:
+                    logging.info("Training corruption viewer: empty diagnostic mask %s", path)
+                    return None
+                raise RuntimeError(f"No foreground segment imported from non-empty labelmap: {path}")
             segId = newIds[-1]
             segment = segmentation.GetSegment(segId)
+            if segment is None:
+                raise RuntimeError(f"Imported segment ID {segId!r} unavailable for {path}")
             segment.SetName(segmentName)
             segment.SetColor(*[float(c) for c in color])
             return segId

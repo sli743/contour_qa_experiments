@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=nsrqa_match_eval
+#SBATCH --partition=hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=48G
+#SBATCH --time=08:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=shaohan@wustl.edu
+#SBATCH --output=%x_%j_log
+set -euo pipefail
+cd /home/shaohan/contour_qa_experiments
+ROI="${ROI:?ROI must be exported}"
+FOLD="${FOLD:?FOLD must be exported}"
+bash scripts/dino_shape/run_matched_previous_nsrqa_fold.sh "${ROI}" "${FOLD}" evaluate

@@ -1,0 +1,19 @@
+#!/bin/bash
+#SBATCH --job-name=supcorr_qa_reg
+#SBATCH --partition=hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=48G
+#SBATCH --time=08:00:00
+#SBATCH --output=jobs/logs/%j_qa_reg.out
+#SBATCH --error=jobs/logs/%j_qa_reg.err
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=shaohan@wustl.edu
+
+set -euo pipefail
+mkdir -p jobs/logs
+: "${ROI:?ROI must be exported}"
+: "${FOLD:?FOLD must be exported}"
+CORRECTION_MODE="${CORRECTION_MODE:-auto}"
+bash scripts/dino_shape/run_actual_autoseg_qa_regression.sh "${ROI}" "${FOLD}" "${CORRECTION_MODE}"

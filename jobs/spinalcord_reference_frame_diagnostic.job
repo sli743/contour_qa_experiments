@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=spcord_ref_frame
+#SBATCH --partition=hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=10
+#SBATCH --mem=64G
+#SBATCH --time=06:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=shaohan@wustl.edu
+#SBATCH --output=slurm-%x-%j.out
+#SBATCH --error=slurm-%x-%j.err
+
+set -euo pipefail
+PROJECT_ROOT="${PROJECT_ROOT:-/home/shaohan/contour_qa_experiments}"
+cd "${PROJECT_ROOT}"
+exec bash scripts/dino_shape/run_spinalcord_reference_frame_diagnostic.sh

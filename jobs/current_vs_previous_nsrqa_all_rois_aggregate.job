@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=qa_vs_nsrqa_all
+#SBATCH --partition=hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16G
+#SBATCH --time=02:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=shaohan@wustl.edu
+#SBATCH --output=%x_%j_log
+set -euo pipefail
+cd /home/shaohan/contour_qa_experiments
+source scripts/dino_shape/activate_3dino_env.sh
+export PYTHONPATH="/home/shaohan/contour_qa_experiments:${PYTHONPATH:-}"
+ROIS_ARG=()
+if [[ -n "${ROIS_EXPORT:-}" ]]; then ROIS_ARG=(--rois "${ROIS_EXPORT//:/,}"); fi
+python -m analysis.summarize_current_vs_matched_nsrqa_all_rois \
+  --study-root "${STUDY_ROOT:-/scratch/shaohan/contour_QA/supervised_autoseg_correction}" \
+  --all-roi-root "${ALLROI_ROOT:-/scratch/shaohan/contour_QA/all_roi_NSRQA_study}" \
+  --variant "${VARIANT:-large_decoder_ft_last2}" "${ROIS_ARG[@]}"

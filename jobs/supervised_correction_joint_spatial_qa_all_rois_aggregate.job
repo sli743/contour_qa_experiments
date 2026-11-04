@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=supcorr_allroi_qaagg
+#SBATCH --partition=hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16G
+#SBATCH --time=02:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=shaohan@wustl.edu
+#SBATCH --output=%x_%j_log
+set -euo pipefail
+cd /home/shaohan/contour_qa_experiments
+source scripts/dino_shape/activate_3dino_env.sh
+export PYTHONPATH="/home/shaohan/contour_qa_experiments:${PYTHONPATH:-}"
+STUDY_ROOT="${STUDY_ROOT:-/scratch/shaohan/contour_QA/supervised_autoseg_correction}"
+ALLROI_ROOT="${ALLROI_ROOT:-/scratch/shaohan/contour_QA/all_roi_NSRQA_study}"
+VARIANT="${VARIANT:-large_decoder_ft_last2}"
+ROIS_EXPORT="${ROIS_EXPORT:-}"
+ARGS=(
+  --study-root "${STUDY_ROOT}"
+  --all-roi-root "${ALLROI_ROOT}"
+  --variant "${VARIANT}"
+)
+if [[ -n "${ROIS_EXPORT}" ]]; then
+  ARGS+=(--rois "${ROIS_EXPORT//:/,}")
+fi
+python -m analysis.summarize_supervised_correction_joint_spatial_qa_all_rois "${ARGS[@]}"

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=supcorr_eval
+#SBATCH --partition=hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=6
+#SBATCH --mem=48G
+#SBATCH --time=08:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=shaohan@wustl.edu
+#SBATCH --output=%A_%a_log
+set -euo pipefail
+cd /home/shaohan/contour_qa_experiments
+bash scripts/dino_shape/run_supervised_correction_eval_task.sh "${SLURM_ARRAY_TASK_ID}"

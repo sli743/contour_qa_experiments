@@ -1,0 +1,27 @@
+#!/bin/bash
+#SBATCH -J lungL_syninspect
+#SBATCH -p hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=32G
+#SBATCH --time=02:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=shaohan@wustl.edu
+#SBATCH -o slurm-lungL-syninspect-%j.out
+#SBATCH -e slurm-lungL-syninspect-%j.err
+
+set -euo pipefail
+REPO="${REPO:-/home/shaohan/contour_qa_experiments}"
+cd "$REPO"
+
+if command -v conda >/dev/null 2>&1; then
+  source "$(conda info --base)/etc/profile.d/conda.sh"
+  conda activate "${CONDA_ENV:-3DINO}"
+fi
+
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+
+python -m analysis.export_lung_l_nsrqa_synthetic_inspection_bank \
+  --config configs/dino_shape/lung_l_nsrqa_synthetic_inspection_bank.yaml

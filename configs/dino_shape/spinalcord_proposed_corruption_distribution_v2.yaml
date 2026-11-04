@@ -1,0 +1,93 @@
+version: 2
+sampler_version: spinalcord_proposed_v2_compositional_pretraining_validation
+sampling_strategy: compositional_v2
+seed: 88
+
+# Candidate only: validate against Month1+Month2 before promoting to training.
+# Clean probability is unconditional. All other probabilities below are
+# conditional on a non-clean draw unless explicitly noted otherwise.
+clean_probability: 0.20
+
+# Every corrupted sample receives one surface deformation. This avoids the v1
+# mutually-exclusive design where pure endpoint cuts lacked realistic boundary
+# disagreement elsewhere along the cord.
+surface_mode_probabilities:
+  smooth_warp: 0.45
+  warp_plus_transverse_noise: 0.35
+  transverse_distance_noise: 0.20
+
+# Smooth deformation severity was already reasonably matched in v1, so the
+# physical support is retained rather than enlarged.
+smooth_warp:
+  control_grid_points_zyx: {min: [4, 4, 4], max: [7, 7, 7]}
+  gaussian_sigma_vox: [4.0, 9.0]
+  amplitude_mm: {min: 2.0, max: 6.0, mode: 4.0}
+  upsample_order: 1
+
+# Cross-sectional correlated boundary noise. S/I support is preserved by
+# construction. This replaces the v1 transverse uniform-offset branch, which
+# was a no-op at the 1.5-mm grid for most sampled offsets.
+transverse_distance_noise:
+  amplitude_mm: {min: 0.5, max: 2.5, mode: 1.25}
+  sigma_z_vox: [5.0, 12.0]
+  sigma_yx_vox: [2.0, 5.0]
+
+# Mild composition used for 35% of corrupted samples. The endpoint axis is
+# sampled separately below.
+warp_plus_transverse_noise:
+  smooth_warp:
+    control_grid_points_zyx: {min: [4, 4, 4], max: [7, 7, 7]}
+    gaussian_sigma_vox: [4.0, 9.0]
+    amplitude_mm: {min: 2.0, max: 5.0, mode: 3.5}
+    upsample_order: 1
+  transverse_distance_noise:
+    amplitude_mm: {min: 0.4, max: 1.75, mode: 0.9}
+    sigma_z_vox: [6.0, 14.0]
+    sigma_yx_vox: [2.5, 5.5]
+
+# Independently layer endpoint truncation on 40% of corrupted samples.
+# Expected severe-inferior frequency among all samples is approximately:
+# 0.80 * 0.40 * 0.875 * 0.78 = 0.218 (21.8%), close to but slightly below the
+# observed Month1+Month2 >20-mm inferior-loss frequency (~25.8%).
+endpoint_probability: 0.40
+endpoint_truncation:
+  inferior_probability: 0.875
+  inferior:
+    mild_probability: 0.22
+    mild_length_mm: [1.5, 3.0]
+    severe_length_mm: [25.0, 50.0]
+  superior_length_mm: [1.5, 3.0]
+
+# Rare independent local missing defect. It is applied after any endpoint cut
+# and is rejected if it changes the current S/I endpoints.
+local_bite_probability: 0.05
+local_bite:
+  coarse_grid_points_zyx: {min: [4, 4, 4], max: [7, 7, 7]}
+  correlation_length_mm: [6.0, 16.0]
+  localization_sigma_mm: [6.0, 18.0]
+  random_field_weight: 1.0
+  localization_weight: 1.5
+  localization_cutoff_sigma: 3.5
+  upsample_order: 1
+  threshold_search_steps: 8
+  removed_fraction: [0.005, 0.05]
+  removed_fraction_tolerance: 0.025
+  min_max_depth_mm: 1.0
+  max_max_depth_mm: 10.0
+  max_extra_remaining_components: 3
+  max_attempts: 10
+  endpoint_guard_attempts: 6
+
+analysis:
+  coverage_percentile: 95.0
+  classifier_repeats: 30
+  classifier_folds: 5
+  classifier_rf_repeats: 10
+  mixture_search_draws: 2500
+  mixture_search_seed: 188
+  joint_pairs:
+    - [hd95_mm, missing_fraction_gt]
+    - [assd_mm, hd95_mm]
+    - [inferior_missing_mm, missing_fraction_gt]
+    - [signed_surface_p05_mm, signed_surface_p95_mm]
+    - [largest_missing_component_fraction, missing_fraction_gt]

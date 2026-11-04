@@ -1,0 +1,75 @@
+version: 1
+roi: SpinalCord
+seed: 88
+
+# Full-volume clinical-mask analysis. XY margin only needs to surround the thin cord;
+# Z margin is expanded automatically to cover the endpoint-extension sweep.
+analysis:
+  margin_xy_mm: 30.0
+  margin_z_mm: 30.0
+
+controlled_families:
+  global_boundary_offset_mm:
+    min: 0.5
+    max: 8.0
+    step: 0.5
+  endpoint_length_mm:
+    min: 5.0
+    max: 100.0
+    step: 5.0
+  local_component_scale: [0.75, 1.0, 1.25]
+  smooth_warp:
+    amplitudes_mm: [2.0, 4.0, 6.0]
+    correlation_mm: 18.0
+    candidates_per_amplitude: 2
+
+# Audit the exact currently prepared NSR-QA corruption distribution by loading
+# <study_root>/configs/SpinalCord/nsrqa.yaml and calling the same training function.
+training_bank:
+  samples_per_development_case: 20
+  include_clean_samples_in_csv: true
+  coverage_reference_excludes_clean: true
+  nearest_neighbor_percentile: 95.0
+
+# Features are grouped so no large block (for example surface quantiles) can
+# dominate the phenotype distance simply by having more columns.
+phenotype_groups:
+  global_size:
+    - missing_fraction_gt
+    - excess_fraction_gt
+    - relative_volume_change_signed
+  surface:
+    - assd_mm
+    - hd95_mm
+    - signed_surface_p05_mm
+    - signed_surface_p50_mm
+    - signed_surface_p95_mm
+  longitudinal:
+    - inferior_missing_mm
+    - inferior_excess_mm
+    - superior_missing_mm
+    - superior_excess_mm
+    - length_difference_signed_mm
+  displacement:
+    - centroid_shift_si_mm
+    - centroid_shift_ap_mm
+    - centroid_shift_lr_mm
+  localization:
+    - largest_missing_component_fraction
+    - largest_excess_component_fraction
+    - largest_missing_extent_si_mm
+    - largest_excess_extent_si_mm
+
+report:
+  temporal_shift_features:
+    - missing_fraction_gt
+    - excess_fraction_gt
+    - hd95_mm
+    - assd_mm
+    - inferior_missing_mm
+    - superior_missing_mm
+    - inferior_excess_mm
+    - superior_excess_mm
+    - centroid_shift_mm
+    - largest_missing_component_fraction
+    - largest_excess_component_fraction

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=lungL_month_eval
+#SBATCH --partition=hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=48G
+#SBATCH --time=08:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=shaohan@wustl.edu
+set -euo pipefail
+PROJECT_ROOT="${PROJECT_ROOT:-/home/shaohan/contour_qa_experiments}"
+cd "${PROJECT_ROOT}"
+source "${PROJECT_ROOT}/scripts/dino_shape/activate_3dino_env.sh"
+exec bash scripts/dino_shape/run_lung_l_nsrqa_corruption_ablation_eval_task.sh "${SLURM_ARRAY_TASK_ID}"

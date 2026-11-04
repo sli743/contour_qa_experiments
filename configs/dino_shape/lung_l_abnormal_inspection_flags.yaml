@@ -1,0 +1,33 @@
+roi: Lung_L
+site: thorax
+
+data_root: /home/shaohan/radformation-data/data
+clinical_metrics_csv: /home/shaohan/radformation-data/data/metrics.csv
+domain_csv: /home/shaohan/radformation-data/OOD_Domain_Assignment_MAD_TOTAL.csv
+output_dir: /scratch/shaohan/contour_QA/lung_l_abnormal_approved_autoseg_inspection
+
+# Preserve the original Radformation clinical Dice and historical `haus`
+# quantity whenever an unambiguous patient/ROI value is available. This matches
+# the earlier OOD/domain-analysis metric source. NIfTI recomputation is an
+# explicit fallback and audit only.
+clinical_metrics_duplicate_policy: exclude
+
+control_limits:
+  # Fit one fixed threshold set, then apply it unchanged to every month.
+  reference_months: [month1, month2, month3]
+  # Robust 3-sigma analogue: median +/- k * (1.4826 * MAD), with IQR/SD
+  # fallback if MAD degenerates.
+  k: 3.0
+
+  # If the exact historical Lung_L control limits are recovered later, place
+  # them here. Non-null values replace only that derived threshold without
+  # changing the flagging logic.
+  overrides:
+    dice: null
+    hd95_mm: null
+    hd99_mm: null
+
+parallel:
+  # 0 => use SLURM_CPUS_PER_TASK / all allocated CPUs. Parallelism is by
+  # patient; each worker computes the NIfTI surface metrics for one case.
+  workers: 0

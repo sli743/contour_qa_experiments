@@ -1,0 +1,87 @@
+version: 1
+sampler_version: spinalcord_proposed_v1_pretraining_validation
+seed: 88
+
+# This is a candidate distribution for validation only. It is intentionally
+# separate from the production NSR-QA config until the Real-vs-Current-vs-
+# Proposed comparison is reviewed.
+clean_probability: 0.20
+
+# Probabilities are conditional on drawing a non-clean sample and sum to 1.
+nonclean_branch_probabilities:
+  smooth_warp: 0.27
+  combined: 0.25
+  transverse_distance_noise: 0.22
+  endpoint_truncation: 0.20
+  local_bite: 0.04
+  transverse_boundary_offset: 0.02
+
+smooth_warp:
+  control_grid_points_zyx: {min: [4, 4, 4], max: [7, 7, 7]}
+  gaussian_sigma_vox: [4.0, 9.0]
+  amplitude_mm: {min: 2.0, max: 6.0, mode: 4.0}
+  upsample_order: 1
+
+# Cross-sectional boundary noise. It preserves the original S/I support by
+# construction, unlike a full 3-D signed-distance perturbation.
+transverse_distance_noise:
+  amplitude_mm: {min: 0.5, max: 2.5, mode: 1.25}
+  sigma_z_vox: [5.0, 12.0]
+  sigma_yx_vox: [2.0, 5.0]
+
+combined:
+  smooth_warp:
+    control_grid_points_zyx: {min: [4, 4, 4], max: [7, 7, 7]}
+    gaussian_sigma_vox: [4.0, 9.0]
+    amplitude_mm: {min: 2.0, max: 5.0, mode: 3.5}
+    upsample_order: 1
+  transverse_distance_noise:
+    amplitude_mm: {min: 0.4, max: 1.75, mode: 0.9}
+    sigma_z_vox: [6.0, 14.0]
+    sigma_yx_vox: [2.5, 5.5]
+
+endpoint_truncation:
+  inferior_probability: 0.85
+  inferior:
+    mild_probability: 0.30
+    mild_length_mm: [1.5, 3.0]
+    severe_length_mm: [25.0, 50.0]
+  superior_length_mm: [1.5, 3.0]
+
+# Local bite uses the existing irregular connected-dropout machinery but with
+# much smaller removed fractions and rejects proposals that alter either S/I
+# endpoint. Thus endpoint truncation remains an explicit separate family.
+local_bite:
+  coarse_grid_points_zyx: {min: [4, 4, 4], max: [7, 7, 7]}
+  correlation_length_mm: [6.0, 16.0]
+  localization_sigma_mm: [6.0, 18.0]
+  random_field_weight: 1.0
+  localization_weight: 1.5
+  localization_cutoff_sigma: 3.5
+  upsample_order: 1
+  threshold_search_steps: 8
+  removed_fraction: [0.005, 0.05]
+  removed_fraction_tolerance: 0.025
+  min_max_depth_mm: 1.0
+  max_max_depth_mm: 10.0
+  max_extra_remaining_components: 3
+  max_attempts: 10
+  endpoint_guard_attempts: 6
+
+transverse_boundary_offset:
+  magnitude_mm: {min: 0.5, max: 1.5, mode: 0.75}
+  outward_probability: 0.50
+
+analysis:
+  coverage_percentile: 95.0
+  classifier_repeats: 30
+  classifier_folds: 5
+  classifier_rf_repeats: 10
+  mixture_search_draws: 2500
+  mixture_search_seed: 188
+  joint_pairs:
+    - [hd95_mm, missing_fraction_gt]
+    - [assd_mm, hd95_mm]
+    - [inferior_missing_mm, missing_fraction_gt]
+    - [signed_surface_p05_mm, signed_surface_p95_mm]
+    - [largest_missing_component_fraction, missing_fraction_gt]

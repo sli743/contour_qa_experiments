@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+#SBATCH -J spcord_corrupt_cal
+#SBATCH -p hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --cpus-per-task=12
+#SBATCH --mem=96G
+#SBATCH --time=1-00:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=shaohan@wustl.edu
+
+set -euo pipefail
+
+PROJECT_ROOT="${PROJECT_ROOT:-/home/shaohan/contour_qa_experiments}"
+STUDY_ROOT="${STUDY_ROOT:-/scratch/shaohan/contour_QA/spinalcord_large_fov_month_temporal_NSRQA_study}"
+LOG_DIR="${STUDY_ROOT}/logs"
+mkdir -p "${LOG_DIR}"
+
+# The actual analysis is CPU/SimpleITK/SciPy work. No GPU is requested.
+exec bash "${PROJECT_ROOT}/scripts/dino_shape/run_spinalcord_corruption_calibration.sh" "$@"

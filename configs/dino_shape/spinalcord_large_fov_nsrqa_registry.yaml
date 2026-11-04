@@ -1,0 +1,53 @@
+version: 1
+study_name: spinalcord_large_fov_NSRQA_v2
+study_root: /scratch/shaohan/contour_QA/spinalcord_large_fov_NSRQA_study
+data_root: /scratch/shaohan/contour_QA/spinalcord_large_fov_NSRQA_study/data  # overridden by preparer with resolved coverage-safe FOV path
+shared_probe_root: /scratch/shaohan/contour_QA/spinalcord_large_fov_NSRQA_study/shared_probe_banks
+seed: 88
+bootstrap_replicates: 5000
+
+# Exact SpinalCord profile copied from all_roi_nsrqa_registry.yaml.
+# FOV/localization are revised only at preprocessing: bbox-midpoint centering plus
+# a coverage-safe global size resolved from development approved contours.
+profiles:
+  thin_branching:
+    global_bad_volume_pct: 10
+    local_bad_hd95_mm: 4
+    changed_region_dilation_voxels: 3
+    stochastic:
+      smooth_warp:
+        control_grid_points_zyx: {min: [4, 4, 4], max: [7, 7, 7]}
+        gaussian_sigma_vox: [4.0, 9.0]
+        max_displacement_mm: [2.0, 6.0]
+        upsample_order: 1
+      distance_noise:
+        gaussian_sigma_vox: [2.5, 6.0]
+        amplitude_mm: [0.75, 3.0]
+        remove_small_components: true
+        min_component_voxels: 8
+        keep_largest_component: false
+      global_boundary_offset:
+        magnitude_mm: [1.5, 3.0]
+        outward_probability: 0.50
+      dropout:
+        coarse_grid_points_zyx: {min: [4, 4, 4], max: [7, 7, 7]}
+        correlation_length_mm: [6.0, 20.0]
+        localization_sigma_mm: [8.0, 25.0]
+        random_field_weight: 1.0
+        localization_weight: 1.5
+        localization_cutoff_sigma: 3.5
+        upsample_order: 1
+        threshold_search_steps: 8
+        removed_fraction: [0.03, 0.25]
+        removed_fraction_tolerance: 0.06
+        min_max_depth_mm: 1.5
+        max_max_depth_mm: 20.0
+        max_extra_remaining_components: 3
+        max_attempts: 8
+    random_morphology:
+      morphology_iterations: [1, 2]
+      translation_voxels: [-2, 2]
+      local_ball_radius_voxels: [1, 4]
+
+rois:
+  SpinalCord: {data_group: spine, profile: thin_branching}

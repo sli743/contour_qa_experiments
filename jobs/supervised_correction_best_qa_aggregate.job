@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=supcorr_qaagg
+#SBATCH --partition=hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16G
+#SBATCH --time=02:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=shaohan@wustl.edu
+#SBATCH --output=%x_%j_log
+set -euo pipefail
+cd /home/shaohan/contour_qa_experiments
+source scripts/dino_shape/activate_3dino_env.sh
+export PYTHONPATH="/home/shaohan/contour_qa_experiments:${PYTHONPATH:-}"
+ROI="${ROI:-Lung_L}"
+VARIANT="${VARIANT:-large_decoder_ft_last2}"
+FOLDS_EXPORT="${FOLDS_EXPORT:-0:1:2:3:4}"
+FOLDS="${FOLDS_EXPORT//:/,}"
+QA_N_BOOT="${QA_N_BOOT:-2000}"
+METHODS_EXPORT="${METHODS_EXPORT:-handcrafted_soft_local:handcrafted_soft_local_boundary:joint_spatial_action_head:spatial_plus_compact_soft}"
+METHODS="${METHODS_EXPORT//:/,}"
+STUDY_ROOT="${STUDY_ROOT:-/scratch/shaohan/contour_QA/supervised_autoseg_correction}"
+OUTPUT_DIR="${OUTPUT_DIR:-}"
+OUTPUT_ZIP="${OUTPUT_ZIP:-}"
+ARGS=(
+  --study-root "${STUDY_ROOT}" --roi "${ROI}" --variant "${VARIANT}"
+  --folds "${FOLDS}" --n-boot "${QA_N_BOOT}" --methods "${METHODS}"
+)
+if [[ -n "${OUTPUT_DIR}" ]]; then ARGS+=(--output-dir "${OUTPUT_DIR}"); fi
+if [[ -n "${OUTPUT_ZIP}" ]]; then ARGS+=(--output-zip "${OUTPUT_ZIP}"); fi
+python -m analysis.summarize_supervised_correction_best_qa_folds "${ARGS[@]}"

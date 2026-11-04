@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=supcorr_pre
+#SBATCH --partition=hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=24G
+#SBATCH --time=02:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=shaohan@wustl.edu
+#SBATCH --output=%A_%a_log
+set -euo pipefail
+cd /home/shaohan/contour_qa_experiments
+bash scripts/dino_shape/run_supervised_correction_preprocess_task.sh "${SLURM_ARRAY_TASK_ID}"

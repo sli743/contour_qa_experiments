@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=monthtemp_post
+#SBATCH --partition=hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16G
+#SBATCH --time=04:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=shaohan@wustl.edu
+#SBATCH --output=slurm-%x-%j.out
+#SBATCH --error=slurm-%x-%j.err
+
+set -euo pipefail
+cd /home/shaohan/contour_qa_experiments
+bash scripts/dino_shape/run_month_temporal_postprocess.sh "$@"
