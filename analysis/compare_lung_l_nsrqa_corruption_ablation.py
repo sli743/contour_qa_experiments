@@ -46,6 +46,7 @@ def parse_args():
     )
     p.add_argument("--top-fraction", type=float, default=0.20)
     p.add_argument("--discordant-n", type=int, default=5)
+    p.add_argument("--roi", default="Lung_L", help="Only used in the report title")
     return p.parse_args()
 
 
@@ -194,7 +195,7 @@ def main():
     score_n = wide["qa_1_minus_dice_mean_nsrqa"]
     score_b = wide["qa_1_minus_dice_mean_baseline"]
     lines = [
-        "# Lung_L NSR-QA corruption-vs-no-corruption experiment",
+        f"# {args.roi} NSR-QA corruption-vs-no-corruption experiment",
         "",
         f"Testing patients: {len(wide)}; seeds per arm: {manifest.groupby('arm').size().to_dict()}.",
         "",

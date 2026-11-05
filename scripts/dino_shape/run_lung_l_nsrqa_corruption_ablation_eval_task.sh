@@ -5,6 +5,7 @@ PROJECT_ROOT="${PROJECT_ROOT:-/home/shaohan/contour_qa_experiments}"
 STUDY_ROOT="${STUDY_ROOT:-/scratch/shaohan/contour_QA/lung_l_nsrqa_corruption_ablation_v1}"
 TASK_INDEX="${1:-${SLURM_ARRAY_TASK_ID:-}}"
 MODE="${MODE:-autoseg_centered}"
+ROI="${ROI:-Lung_L}"
 if [[ -z "${TASK_INDEX}" ]]; then
   echo "Usage: $0 TASK_INDEX (0..5)" >&2
   exit 2
@@ -30,12 +31,12 @@ INPUT_ROOT="${STUDY_ROOT}/actual_autoseg_preprocessed"
 OUT="${STUDY_ROOT}/evaluations/${ARM}/seed${SEED}"
 mkdir -p "${OUT}"
 
-echo "[eval] task=${TASK_INDEX} arm=${ARM} seed=${SEED} mode=${MODE}"
+echo "[eval] task=${TASK_INDEX} roi=${ROI} arm=${ARM} seed=${SEED} mode=${MODE}"
 python -m evaluation.actual_autoseg.eval_actual_autoseg_nsrqa \
   --config "${CONFIG}" \
   --checkpoint "${CHECKPOINT}" \
   --input-root "${INPUT_ROOT}" \
-  --roi Lung_L \
+  --roi "${ROI}" \
   --mode "${MODE}" \
   --output-csv "${OUT}/actual_autoseg_testing.csv" \
   --case-output-root "${OUT}/actual_autoseg_cases" \
@@ -46,7 +47,7 @@ python -m evaluation.actual_autoseg.eval_clean_approved_reconstruction \
   --config "${CONFIG}" \
   --checkpoint "${CHECKPOINT}" \
   --input-root "${INPUT_ROOT}" \
-  --roi Lung_L \
+  --roi "${ROI}" \
   --mode "${MODE}" \
   --output-csv "${OUT}/clean_approved_testing.csv" \
   --case-output-root "${OUT}/clean_approved_cases" \

@@ -15,6 +15,7 @@ PROJECT_ROOT="${PROJECT_ROOT:-/home/shaohan/contour_qa_experiments}"
 STUDY_ROOT="${STUDY_ROOT:-/scratch/shaohan/contour_QA/lung_l_nsrqa_corruption_ablation_month_temporal_v1}"
 RAW_DATA_ROOT="${RAW_DATA_ROOT:-/home/shaohan/radformation-data/data}"
 MODE="${MODE:-autoseg_centered}"
+ROI="${ROI:-Lung_L}"
 DEV_INPUT_ROOT="${DEV_INPUT_ROOT:-${STUDY_ROOT}/actual_autoseg_preprocessed_dev}"
 DEV_EVAL_ROOT="${DEV_EVAL_ROOT:-${STUDY_ROOT}/evaluations_dev}"
 TASK="${1:-${SLURM_ARRAY_TASK_ID:-}}"
@@ -48,19 +49,19 @@ if [[ "${TASK}" == "prepare" ]]; then
   echo "[dev-prepare] output=${DEV_INPUT_ROOT}"
   python -m evaluation.actual_autoseg.preprocess_actual_autoseg \
     --config "${REFERENCE_CONFIG}" \
-    --roi Lung_L \
+    --roi "${ROI}" \
     --group lungs_chest \
     --raw-data-root "${RAW_DATA_ROOT}" \
     --output-root "${DEV_INPUT_ROOT}" \
     --mode "${MODE}" \
     --splits training1 validation1
 
-  python - "${DEV_INPUT_ROOT}" "${MODE}" <<'PY'
+  python - "${DEV_INPUT_ROOT}" "${MODE}" "${ROI}" <<'PY'
 import csv, sys
 from collections import Counter
 from pathlib import Path
-root, mode = Path(sys.argv[1]), sys.argv[2]
-with (root / "manifests" / "Lung_L_preprocess_manifest.csv").open(newline="", encoding="utf-8") as f:
+root, mode, roi = Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+with (root / "manifests" / f"{roi}_preprocess_manifest.csv").open(newline="", encoding="utf-8") as f:
     rows = [r for r in csv.DictReader(f) if r.get("localization_mode") == mode]
 for split in ("training1", "validation1"):
     c = Counter(r.get("status") for r in rows if r.get("split") == split)
@@ -78,17 +79,17 @@ SEED="${FIELDS[1]}"
 CONFIG="${FIELDS[2]}"
 CHECKPOINT="${FIELDS[3]}"
 [[ -s "${CHECKPOINT}" ]] || { echo "Missing checkpoint for ${ARM}: ${CHECKPOINT}" >&2; exit 2; }
-[[ -d "${DEV_INPUT_ROOT}/${MODE}/Lung_L" ]] || { echo "Run the prepare step first: ${DEV_INPUT_ROOT}/${MODE}/Lung_L missing" >&2; exit 2; }
+[[ -d "${DEV_INPUT_ROOT}/${MODE}/${ROI}" ]] || { echo "Run the prepare step first: ${DEV_INPUT_ROOT}/${MODE}/${ROI} missing" >&2; exit 2; }
 OUT="${DEV_EVAL_ROOT}/${ARM}/seed${SEED}"
 mkdir -p "${OUT}"
 
-echo "[dev-eval] task=${TASK} arm=${ARM} seed=${SEED} mode=${MODE}"
+echo "[dev-eval] task=${TASK} roi=${ROI} arm=${ARM} seed=${SEED} mode=${MODE}"
 echo "[dev-eval] checkpoint=${CHECKPOINT}"
 python -m evaluation.actual_autoseg.eval_actual_autoseg_nsrqa \
   --config "${CONFIG}" \
   --checkpoint "${CHECKPOINT}" \
   --input-root "${DEV_INPUT_ROOT}" \
-  --roi Lung_L \
+  --roi "${ROI}" \
   --mode "${MODE}" \
   --output-csv "${OUT}/actual_autoseg_dev.csv" \
   --case-output-root "${OUT}/actual_autoseg_cases" \
@@ -99,7 +100,7 @@ python -m evaluation.actual_autoseg.eval_clean_approved_reconstruction \
   --config "${CONFIG}" \
   --checkpoint "${CHECKPOINT}" \
   --input-root "${DEV_INPUT_ROOT}" \
-  --roi Lung_L \
+  --roi "${ROI}" \
   --mode "${MODE}" \
   --output-csv "${OUT}/clean_approved_dev.csv" \
   --case-output-root "${OUT}/clean_approved_cases" \

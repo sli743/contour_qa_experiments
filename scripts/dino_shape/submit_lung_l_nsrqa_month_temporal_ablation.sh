@@ -2,6 +2,9 @@
 set -euo pipefail
 
 PROJECT_ROOT="${PROJECT_ROOT:-/home/shaohan/contour_qa_experiments}"
+# ROI defaults to Lung_L; submit_lung_r_nsrqa_month_temporal_ablation.sh sets ROI=Lung_R.
+ROI="${ROI:-Lung_L}"
+JOB_TAG="${JOB_TAG:-lungL}"
 STUDY_ROOT="${STUDY_ROOT:-/scratch/shaohan/contour_QA/lung_l_nsrqa_corruption_ablation_month_temporal_v1}"
 TEMPORAL_STUDY_ROOT="${TEMPORAL_STUDY_ROOT:-/scratch/shaohan/contour_QA/all_roi_NSRQA_month_temporal_study}"
 SPLIT_CONFIG="${SPLIT_CONFIG:-${PROJECT_ROOT}/configs/dino_shape/month_temporal_nsrqa_split.yaml}"
@@ -13,10 +16,11 @@ MAX_EVAL_CONCURRENT="${MAX_EVAL_CONCURRENT:-2}"
 cd "${PROJECT_ROOT}"
 mkdir -p "${STUDY_ROOT}/logs"
 
-EXPORTS="ALL,PROJECT_ROOT=${PROJECT_ROOT},STUDY_ROOT=${STUDY_ROOT},TEMPORAL_STUDY_ROOT=${TEMPORAL_STUDY_ROOT},SPLIT_CONFIG=${SPLIT_CONFIG},CALIBRATED_CONFIG=${CALIBRATED_CONFIG},SEED=${SEED}"
+EXPORTS="ALL,PROJECT_ROOT=${PROJECT_ROOT},ROI=${ROI},STUDY_ROOT=${STUDY_ROOT},TEMPORAL_STUDY_ROOT=${TEMPORAL_STUDY_ROOT},SPLIT_CONFIG=${SPLIT_CONFIG},CALIBRATED_CONFIG=${CALIBRATED_CONFIG},SEED=${SEED}"
 jobid() { printf '%s' "$1" | cut -d';' -f1; }
 
 PREP_RAW="$(sbatch --parsable -p hugo --account=geoffrey_hugo \
+  --job-name="${JOB_TAG}_month_prep" \
   --export="${EXPORTS}" \
   --output="${STUDY_ROOT}/logs/slurm-%x-%j.out" \
   --error="${STUDY_ROOT}/logs/slurm-%x-%j.err" \
@@ -26,6 +30,7 @@ echo "Submitted Month-temporal prepare job: ${PREP}"
 
 # Exactly two tasks: task 0 = NSR-QA corruption, task 1 = no-corruption baseline.
 TRAIN_RAW="$(sbatch --parsable -p hugo --account=geoffrey_hugo \
+  --job-name="${JOB_TAG}_month_train" \
   --dependency="afterok:${PREP}" \
   --export="${EXPORTS}" \
   --output="${STUDY_ROOT}/logs/slurm-%x-%A_%a.out" \
@@ -36,6 +41,7 @@ TRAIN="$(jobid "${TRAIN_RAW}")"
 echo "Submitted two-arm single-seed training array: ${TRAIN}"
 
 EVAL_RAW="$(sbatch --parsable -p hugo --account=geoffrey_hugo \
+  --job-name="${JOB_TAG}_month_eval" \
   --dependency="afterok:${TRAIN}" \
   --export="${EXPORTS}" \
   --output="${STUDY_ROOT}/logs/slurm-%x-%A_%a.out" \
@@ -46,6 +52,7 @@ EVAL="$(jobid "${EVAL_RAW}")"
 echo "Submitted Month3 real-autoseg evaluation array: ${EVAL}"
 
 POST_RAW="$(sbatch --parsable -p hugo --account=geoffrey_hugo \
+  --job-name="${JOB_TAG}_month_post" \
   --dependency="afterok:${EVAL}" \
   --export="${EXPORTS}" \
   --output="${STUDY_ROOT}/logs/slurm-%x-%j.out" \
@@ -56,7 +63,7 @@ echo "Submitted postprocess job: ${POST}"
 
 cat <<EOF
 
-Month-temporal Lung_L ablation submitted
+Month-temporal ${ROI} ablation submitted
   prepare:     ${PREP}
   train:       ${TRAIN}
   evaluate:    ${EVAL}
@@ -74,7 +81,8 @@ Arms / seed:
   NSR-QA corruption, seed ${SEED}
   no-corruption baseline, seed ${SEED}
 
-By default this uses the same calibrated corruption config as the earlier
-lung_l_nsrqa_corruption_ablation_v1 experiment so the split is the main change.
+Corruption severities: ${CALIBRATED_CONFIG}
+By default this is the Lung_L-calibrated config from the earlier
+lung_l_nsrqa_corruption_ablation_v1 experiment (also for other ROIs).
 To use a newer validated severity config, override CALIBRATED_CONFIG when submitting.
 EOF

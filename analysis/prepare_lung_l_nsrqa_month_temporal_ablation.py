@@ -14,6 +14,10 @@ This is deliberately a split-only follow-up to the earlier
 The corruption severity source is supplied separately so the same script can be
 used either for a direct split-matched rerun of the earlier ablation or, later,
 for a newly validated severity configuration.
+
+``--roi`` (default Lung_L) selects the target ROI; its data paths and
+``data.roi_name`` come from the temporal reference config, so e.g. Lung_R can
+be trained with the Lung_L-calibrated corruption severities.
 """
 from __future__ import annotations
 
@@ -50,6 +54,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--temporal-split-summary", required=True)
     p.add_argument("--study-root", required=True)
     p.add_argument("--seed", type=int, default=91)
+    p.add_argument("--roi", default="Lung_L", help="Target ROI; must match the temporal reference config")
     return p.parse_args()
 
 
@@ -81,10 +86,16 @@ def main() -> None:
     split_summary = json.loads(split_summary_path.read_text(encoding="utf-8"))
     validate_original_family_set(base)
 
+    roi = args.roi
+    roi_key = roi.lower()
     temporal_data = temporal_ref.get("data", {})
     missing_keys = [k for k in DATA_KEYS if not temporal_data.get(k)]
     if missing_keys:
-        raise KeyError(f"Temporal Lung_L config missing data paths: {missing_keys}")
+        raise KeyError(f"Temporal {roi} config missing data paths: {missing_keys}")
+    ref_roi = temporal_data.get("roi_name")
+    if ref_roi and ref_roi != roi:
+        raise RuntimeError(f"--roi {roi} does not match temporal reference config roi_name={ref_roi}")
+    severity_source_roi = base.get("data", {}).get("roi_name", "unknown")
 
     split = split_summary.get("split", {})
     for key in ("training1", "validation1", "testing1"):
@@ -101,12 +112,12 @@ def main() -> None:
         raise RuntimeError("testing1 does not match temporal split summary Month3 holdout")
 
     # Strong guard against accidentally pointing back to the legacy ~15% random
-    # test split.  The exact available Lung_L count is ROI-specific, but the
+    # test split.  The exact available count is ROI-specific, but the
     # Month3 source cohort is substantially larger than the old ~20-case split.
     n_test_labels = nifti_count(temporal_data["test_label_dir"])
     if n_test_labels < 40:
         raise RuntimeError(
-            f"Temporal Lung_L test_label_dir has only {n_test_labels} cases: "
+            f"Temporal {roi} test_label_dir has only {n_test_labels} cases: "
             f"{temporal_data['test_label_dir']}. Expected a Month3-sized cohort, "
             "not the legacy random testing1 split."
         )
@@ -118,7 +129,7 @@ def main() -> None:
     }
     for key, n in counts.items():
         if n <= 0:
-            raise RuntimeError(f"Empty temporal Lung_L partition: {key}")
+            raise RuntimeError(f"Empty temporal {roi} partition: {key}")
 
     config_dir = study_root / "configs"
     config_dir.mkdir(parents=True, exist_ok=True)
@@ -129,13 +140,17 @@ def main() -> None:
     seed = int(args.seed)
     for arm in ("nsrqa_corruption", "no_corruption"):
         cfg = arm_config(copy.deepcopy(base), study_root, arm, seed)
+        cfg["experiment_name"] = f"{roi_key}_{arm}_seed{seed}"
         cfg.setdefault("data", {})
+        cfg["data"]["roi_name"] = roi
         for key in DATA_KEYS:
             cfg["data"][key] = str(Path(temporal_data[key]).expanduser().resolve())
 
         meta = cfg.setdefault("study_metadata", {})
         meta.update({
-            "experiment": "Lung_L real-autoseg NSR-QA corruption ablation, Month3 temporal holdout",
+            "experiment": f"{roi} real-autoseg NSR-QA corruption ablation, Month3 temporal holdout",
+            "target_roi": roi,
+            "corruption_severity_source_roi": severity_source_roi,
             "split_design": "Month1+Month2 development; Month3 locked temporal test",
             "training1_semantics": "Month1+Month2 temporal-development training subset",
             "validation1_semantics": "Month1+Month2 temporal-development validation subset",
@@ -145,7 +160,7 @@ def main() -> None:
             "source_calibrated_config": str(calibrated_path),
             "single_seed_ablation": True,
             "month3_patient_ids_before_roi_availability_filter": len(test_ids),
-            "lung_l_test_labels_available": n_test_labels,
+            f"{roi_key}_test_labels_available": n_test_labels,
         })
 
         out = config_dir / f"{arm}_seed{seed}.yaml"
@@ -179,6 +194,8 @@ def main() -> None:
         "temporal_reference_config": str(temporal_cfg_path),
         "temporal_split_summary": str(split_summary_path),
         "seed": seed,
+        "roi": roi,
+        "corruption_severity_source_roi": severity_source_roi,
         "arms": ["nsrqa_corruption", "no_corruption"],
         "n_training_tasks": 2,
         "split_semantics": {
@@ -191,7 +208,7 @@ def main() -> None:
             "validation1": len(val_ids),
             "testing1": len(test_ids),
         },
-        "lung_l_available_label_counts": counts,
+        f"{roi_key}_available_label_counts": counts,
         "frozen_original_nsrqa_clean_probability": EXPECTED_CLEAN,
         "frozen_original_nsrqa_branch_probabilities": EXPECTED_BRANCHES,
         "primary_qa_signal": "1-Dice(autoseg, reconstruction)",
@@ -209,11 +226,12 @@ def main() -> None:
         json.dumps(split_summary, indent=2) + "\n", encoding="utf-8"
     )
 
-    print(f"Prepared Month-temporal Lung_L ablation under {study_root}")
+    print(f"Prepared Month-temporal {roi} ablation under {study_root}")
     print(f"  seed: {seed}")
+    print(f"  corruption severities from: {calibrated_path} (roi_name={severity_source_roi})")
     print(f"  temporal nominal patients: train={len(train_ids)} val={len(val_ids)} test={len(test_ids)}")
     print(
-        "  Lung_L available labels: "
+        f"  {roi} available labels: "
         f"train={counts['training1_labels']} val={counts['validation1_labels']} test={counts['testing1_labels']}"
     )
     for row in rows:

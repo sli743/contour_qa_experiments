@@ -15,6 +15,7 @@ PROJECT_ROOT="${PROJECT_ROOT:-/home/shaohan/contour_qa_experiments}"
 STUDY_ROOT="${STUDY_ROOT:-/scratch/shaohan/contour_QA/lung_l_nsrqa_corruption_ablation_month_temporal_v1}"
 RAW_DATA_ROOT="${RAW_DATA_ROOT:-/home/shaohan/radformation-data/data}"
 MODE="${MODE:-autoseg_centered}"
+ROI="${ROI:-Lung_L}"
 ARRAY="${ARRAY:-0,1}"
 SKIP_PREPARE="${SKIP_PREPARE:-0}"
 
@@ -28,7 +29,7 @@ done
 [[ -s "${STUDY_ROOT}/experiment_manifest.csv" ]] || { echo "ERROR: missing ${STUDY_ROOT}/experiment_manifest.csv" >&2; exit 2; }
 
 mkdir -p "${STUDY_ROOT}/logs"
-EXPORTS="ALL,PROJECT_ROOT=${PROJECT_ROOT},STUDY_ROOT=${STUDY_ROOT},RAW_DATA_ROOT=${RAW_DATA_ROOT},MODE=${MODE}"
+EXPORTS="ALL,PROJECT_ROOT=${PROJECT_ROOT},STUDY_ROOT=${STUDY_ROOT},RAW_DATA_ROOT=${RAW_DATA_ROOT},MODE=${MODE},ROI=${ROI}"
 jobid() { printf '%s' "$1" | cut -d';' -f1; }
 
 DEPENDENCY=()
@@ -55,7 +56,7 @@ echo "Submitted dev reconstruction (array ${ARRAY}): ${EVAL}"
 
 cat <<EOF2
 
-Lung_L month-temporal development reconstruction submitted (diagnostic only)
+${ROI} month-temporal development reconstruction submitted (diagnostic only)
   prepare:  ${PREP:-skipped}
   evaluate: ${EVAL}
 
@@ -63,7 +64,7 @@ Inputs (training1 + validation1, ${MODE}):
   ${STUDY_ROOT}/actual_autoseg_preprocessed_dev
 Outputs per arm:
   ${STUDY_ROOT}/evaluations_dev/<arm>/seed<seed>/actual_autoseg_dev.csv
-  ${STUDY_ROOT}/evaluations_dev/<arm>/seed<seed>/actual_autoseg_cases/${MODE}/Lung_L/<split>/patient_<id>/
+  ${STUDY_ROOT}/evaluations_dev/<arm>/seed<seed>/actual_autoseg_cases/${MODE}/${ROI}/<split>/patient_<id>/
 Logs:
   ${STUDY_ROOT}/logs
 EOF2
