@@ -1,0 +1,55 @@
+#!/bin/bash
+#SBATCH --job-name=lungL_fov_audit
+#SBATCH -p hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=32G
+#SBATCH --time=04:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=shaohan@wustl.edu
+#SBATCH --output=slurm-lungL_fov_audit-%j.out
+#SBATCH --error=slurm-lungL_fov_audit-%j.err
+
+set -euo pipefail
+
+# Audits whether the fixed lungs_chest crop (radformation_preprocess_roiwise.py,
+# 192x192x160 @ 1.5 mm centered on the Lung_L+Lung_R centroid) clips the raw
+# contour, in both the stored training crop and the autoseg-centered test crop.
+#   PATIENTS="62" sbatch jobs/lung_l_fov_clipping_audit.job   # quick single-case check
+#   ROI=Lung_R sbatch jobs/lung_l_fov_clipping_audit.job
+
+PROJECT_ROOT="${PROJECT_ROOT:-/home/shaohan/contour_qa_experiments}"
+STUDY_ROOT="${STUDY_ROOT:-/scratch/shaohan/contour_QA/lung_l_nsrqa_month_temporal_family_validated_v1}"
+CONFIG="${CONFIG:-${STUDY_ROOT}/configs/nsrqa_corruption_seed91.yaml}"
+RAW_DATA_ROOT="${RAW_DATA_ROOT:-/home/shaohan/radformation-data/data}"
+ROI="${ROI:-Lung_L}"
+OUTPUT_DIR="${OUTPUT_DIR:-${STUDY_ROOT}/fov_clipping_audit}"
+MINOR_LOSS_PCT="${MINOR_LOSS_PCT:-1}"
+MAJOR_LOSS_PCT="${MAJOR_LOSS_PCT:-5}"
+PATIENTS="${PATIENTS:-}"
+
+[[ -s "${CONFIG}" ]] || { echo "Missing NSR-QA config: ${CONFIG}" >&2; exit 2; }
+
+cd "${PROJECT_ROOT}"
+source "${PROJECT_ROOT}/scripts/dino_shape/activate_3dino_env.sh"
+export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
+
+patient_args=()
+if [[ -n "${PATIENTS}" ]]; then
+  read -r -a patient_list <<< "${PATIENTS}"
+  patient_args=(--patients "${patient_list[@]}")
+fi
+
+python -m analysis.audit_lung_fov_clipping \
+  --config "${CONFIG}" \
+  --roi "${ROI}" \
+  --group lungs_chest \
+  --raw-data-root "${RAW_DATA_ROOT}" \
+  --output-dir "${OUTPUT_DIR}" \
+  --splits training1 validation1 testing1 \
+  --minor-loss-pct "${MINOR_LOSS_PCT}" \
+  --major-loss-pct "${MAJOR_LOSS_PCT}" \
+  ${patient_args[@]+"${patient_args[@]}"}
+
+echo "${ROI} FOV clipping audit complete"
+echo "  Output: ${OUTPUT_DIR}"
