@@ -1,0 +1,65 @@
+version: 1
+# Lung_R copy of lung_l_error_field_characterization.yaml: identical settings,
+# only roi / experiment_name / output_dir differ.
+experiment_name: lung_r_error_field_characterization_v1
+roi: Lung_R
+seed: 88
+
+# Keep the same temporal-development principle as the calibration work.
+# Month3/testing1 is never used to estimate the real-error distribution.
+split_yaml: configs/dino_shape/month_temporal_nsrqa_split.yaml
+calibration_split: training1
+raw_data_root: /home/shaohan/radformation-data/data
+domain_csv: /home/shaohan/radformation-data/OOD_Domain_Assignment_MAD_TOTAL.csv
+site: thorax
+output_dir: /scratch/shaohan/contour_QA/lung_r_error_field_characterization_v1
+
+geometry:
+  isotropic_spacing_mm: 1.5
+  # Smaller than the primitive severity sweep because the union already
+  # contains all real missing/excess anatomy. This mainly provides context and
+  # protects distance calculations near the crop boundary.
+  crop_margin_mm: 20.0
+
+parallel:
+  # Patient-level multiprocessing. 0 means use SLURM_CPUS_PER_TASK.
+  workers: 0
+  # Prevent ITK from spawning another thread pool inside each process.
+  sitk_threads_per_worker: 1
+
+error_field:
+  # Positive signed displacement = autoseg outside approved; negative = inward.
+  direction_noise_floor_mm: 0.5
+
+  # Direct smooth/local decomposition of the measured signed surface field.
+  smooth_sigmas_mm: [10.0, 20.0, 40.0]
+  primary_smooth_sigma_mm: 20.0
+
+  # Surface points are spatially thinned before kNN smoothing to keep the
+  # analysis fast and memory bounded while retaining anatomical coverage.
+  surface_sample_grid_mm: 3.0
+  max_surface_samples: 30000
+  smoothing_neighbors: 96
+
+  # Approximate empirical spatial correlation of the measured displacement.
+  correlation_max_points: 2500
+  correlation_pairs: 40000
+  correlation_bin_mm: 5.0
+  correlation_max_distance_mm: 100.0
+
+components:
+  # Ignore tiny resampling/speckle components in the interpretable patch table.
+  # Raw connected-component counts are still retained per patient.
+  min_component_volume_mm3: 100.0
+
+inspection:
+  # Two candidates are selected for each complementary phenotype, then
+  # deduplicated and capped to a compact manual-review shortlist.
+  patients_per_category: 2
+  include_domain_representatives: true
+  max_shortlist_patients: 16
+  export_shortlist: true
+  export_workers: 4
+
+  # Binary surface masks exported for Slicer alongside the signed float maps.
+  surface_display_threshold_mm: 2.0

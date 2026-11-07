@@ -25,5 +25,6 @@ export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS=1
 
+# CONFIG may be overridden (e.g. the Lung_R calibration config).
 python -m analysis.calibrate_lung_l_nsrqa_severity \
-  --config configs/dino_shape/lung_l_nsrqa_severity_calibration.yaml
+  --config "${CONFIG:-configs/dino_shape/lung_l_nsrqa_severity_calibration.yaml}"

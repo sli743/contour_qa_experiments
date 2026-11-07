@@ -147,6 +147,10 @@ def main() -> None:
             cfg["data"][key] = str(Path(temporal_data[key]).expanduser().resolve())
 
         meta = cfg.setdefault("study_metadata", {})
+        # arm_config's text assumes Lung_L severities; name the actual source.
+        meta["intervention"] = str(meta.get("intervention", "")).replace(
+            "with Lung_L severity", f"with {severity_source_roi} severity"
+        )
         meta.update({
             "experiment": f"{roi} real-autoseg NSR-QA corruption ablation, Month3 temporal holdout",
             "target_roi": roi,

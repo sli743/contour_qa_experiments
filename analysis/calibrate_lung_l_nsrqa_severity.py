@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Calibrate Lung_L NSR-QA corruption severities from measured real errors.
+"""Calibrate lung NSR-QA corruption severities from measured real errors.
+
+Originally written for Lung_L (lung_l_nsrqa_severity_calibration_v1, the
+severity config behind lung_l_nsrqa_corruption_ablation_month_temporal_v1).
+The config key ``roi`` (default Lung_L) selects the ROI, so the identical
+method can be applied to Lung_R from a Lung_R error-field characterization.
 
 This is intentionally a calibration / visual-audit stage.  It does not modify
 training code and it does not fit each clinical case to a synthetic corruption
@@ -243,9 +248,19 @@ def calibrate_severity(case_df: pd.DataFrame, component_df: pd.DataFrame, cfg: M
     }, pd.DataFrame(rows)
 
 
+def cfg_roi(cfg: Mapping) -> str:
+    return str(cfg.get("roi", "Lung_L"))
+
+
 def make_recommended_training_config(base_cfg: Mapping, sev: Mapping, cfg: Mapping) -> Dict:
     out = copy.deepcopy(dict(base_cfg))
-    out["experiment_name"] = str(cfg["output"].get("recommended_experiment_name", "dino_shape_stochastic_region_dropout_Lung_L_data_calibrated"))
+    roi = cfg_roi(cfg)
+    out["experiment_name"] = str(cfg["output"].get("recommended_experiment_name", f"dino_shape_stochastic_region_dropout_{roi}_data_calibrated"))
+    # When calibrating another ROI from a shared base config, make the data
+    # block describe that ROI (downstream prepare scripts override data paths).
+    # Lung_L (same ROI as the base config) keeps the original output unchanged.
+    if (out.get("data") or {}).get("roi_name") != roi:
+        out["data"] = {"roi_name": roi, **dict(cfg.get("data") or {})}
     spec = out["stochastic_region_dropout"]
     # Deliberately leave clean_probability, branch_probabilities and all
     # correlation/localization parameters untouched.
@@ -255,7 +270,9 @@ def make_recommended_training_config(base_cfg: Mapping, sev: Mapping, cfg: Mappi
     spec["dropout"]["removed_fraction"] = [float(sev["dropout_fraction"]["p10"]), float(sev["dropout_fraction"]["p90"])]
     spec["dropout"]["min_max_depth_mm"] = float(sev["dropout_depth"]["p10"])
     spec["dropout"]["max_max_depth_mm"] = float(sev["dropout_depth"]["p90"])
-    out.setdefault("study_metadata", {})["severity_calibration"] = "Lung_L direct real-error field characterization, training1 only"
+    out.setdefault("study_metadata", {})["severity_calibration"] = f"{roi} direct real-error field characterization, training1 only"
+    out["study_metadata"]["severity_calibration_roi"] = roi
+    out["study_metadata"]["severity_calibration_error_field_root"] = str(cfg.get("error_field_root"))
     out["study_metadata"]["severity_calibration_note"] = (
         "Corruption families/probabilities/correlation settings preserved from base config; only severity ranges changed."
     )
@@ -512,10 +529,11 @@ def quantile_comparison(real_df: pd.DataFrame, audit_df: pd.DataFrame) -> pd.Dat
 def write_report(outdir: Path, cfg: Mapping, sev: Mapping, sev_df: pd.DataFrame,
                  audit_df: pd.DataFrame, audit_fail: pd.DataFrame, examples: Sequence[int]) -> None:
     base = cfg["_base_training_cfg"]["stochastic_region_dropout"]
+    roi = cfg_roi(cfg)
     lines = [
-        "# Lung_L NSR-QA corruption severity calibration",
+        f"# {roi} NSR-QA corruption severity calibration",
         "",
-        "This stage changes **severity only**. The existing corruption families, clean probability, branch probabilities, and spatial correlation/localization settings are copied unchanged from the previous Lung_L NSR-QA config.",
+        f"This stage changes **severity only**. The existing corruption families, clean probability, branch probabilities, and spatial correlation/localization settings are copied unchanged from the base NSR-QA config (`{cfg.get('base_training_config')}`). Severities come from the {roi} error-field characterization (`{cfg.get('error_field_root')}`).",
         "",
         f"Calibration cases: {sev['n_cases_used']} (training1 only). Excluded IDs: {sev['excluded_patient_ids'] or 'none'}.",
         "Month3/testing1 is not used.",
@@ -547,12 +565,12 @@ def write_report(outdir: Path, cfg: Mapping, sev: Mapping, sev_df: pd.DataFrame,
         "",
         "## Visual inspection bank",
         "",
-        f"Patients selected across Lung_L volume: {', '.join(map(str, examples))}",
+        f"Patients selected across {roi} volume: {', '.join(map(str, examples))}",
         "",
         "Open `example_bank/` with the existing `TrainingCorruptionExampleViewer` Slicer module. The viewer will show three pseudo-ROI groups:",
-        "- `Lung_L_low`: P10 physical severity",
-        "- `Lung_L_typical`: P50 physical severity",
-        "- `Lung_L_high`: P90 physical severity",
+        f"- `{roi}_low`: P10 physical severity",
+        f"- `{roi}_typical`: P50 physical severity",
+        f"- `{roi}_high`: P90 physical severity",
         "",
         "For each patient/group it exports clean target, smooth warp, distance noise, combined, stochastic dropout, inward global offset, outward global offset, and changed/missing/excess diagnostic masks.",
         "",
@@ -644,7 +662,7 @@ def main() -> None:
     for si, stratum in enumerate(strata):
         if stratum not in {"low", "typical", "high"}: raise ValueError(stratum)
         for pi, pid in enumerate(examples):
-            case_dir = bank_root / f"Lung_L_{stratum}" / f"patient_{pid}"
+            case_dir = bank_root / f"{cfg_roi(cfg)}_{stratum}" / f"patient_{pid}"
             rows = export_example_case(
                 pid, labels[pid], cts[pid], case_dir, proposed_cfg, sev, stratum,
                 seed0 + si * 10000019 + pi * 100003,
@@ -655,7 +673,7 @@ def main() -> None:
     pd.DataFrame(manifest_rows).to_csv(outdir / "example_bank_manifest.csv", index=False)
 
     write_report(outdir, cfg, sev, sev_df, audit_df, fail_df, examples)
-    print(f"Wrote Lung_L NSR-QA severity calibration to {outdir}")
+    print(f"Wrote {cfg_roi(cfg)} NSR-QA severity calibration to {outdir}")
     print(f"Recommended training config: {outdir / 'recommended_training_config.yaml'}")
     print(f"Slicer example bank: {bank_root}")
 

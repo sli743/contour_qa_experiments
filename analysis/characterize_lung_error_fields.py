@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Directly characterize real Lung_L autosegmentation error fields.
+"""Directly characterize real lung (Lung_L or Lung_R, config ``roi``) autosegmentation error fields.
 
 This analysis intentionally avoids fitting each patient to a synthetic
 corruption family.  For every development patient it measures the observed
@@ -386,7 +386,7 @@ def displacement_correlation_length(points_mm: np.ndarray, values: np.ndarray,
 def component_rows(mask: np.ndarray, kind: str, approved: np.ndarray,
                    approved_surface: np.ndarray, distance_to_approved_surface: np.ndarray,
                    spacing_zyx: Sequence[float], min_volume_mm3: float,
-                   patient_id: int, cohort: str, domain: str):
+                   patient_id: int, cohort: str, domain: str, lateral_is_low_x: bool = False):
     spacing = np.asarray(spacing_zyx, dtype=float)
     voxel_volume = float(np.prod(spacing))
     gt_vox = int(approved.sum())
@@ -423,11 +423,11 @@ def component_rows(mask: np.ndarray, kind: str, approved: np.ndarray,
             "max_depth_from_approved_surface_mm": float(np.max(depth)) if len(depth) else 0.0,
             "median_depth_from_approved_surface_mm": float(np.median(depth)) if len(depth) else 0.0,
             "surface_footprint_fraction": float(contact.sum() / gt_surface_vox),
-            # Canonical LPS: low z=inferior, low y=anterior, and for Lung_L
-            # low x is relatively medial/rightward while high x is lateral/leftward.
+            # Canonical LPS: low z=inferior, low y=anterior, low x=patient right.
+            # For Lung_L high x is lateral; for Lung_R low x is lateral, so flip.
             "centroid_norm_si_inferior_to_superior": float(norm[0]),
             "centroid_norm_ap_anterior_to_posterior": float(norm[1]),
-            "centroid_norm_lr_medial_to_lateral": float(norm[2]),
+            "centroid_norm_lr_medial_to_lateral": float(1.0 - norm[2] if lateral_is_low_x else norm[2]),
             "touches_inferior_extent": bool(lo[0] <= glo[0] + 1),
             "touches_superior_extent": bool(hi[0] >= ghi[0] - 1),
             "touches_anterior_extent": bool(lo[1] <= glo[1] + 1),
@@ -547,11 +547,14 @@ def case_characterization(pid: int, cohort: str, domain: str, cfg: Mapping,
     # both missing and excess connected components.
     d_to_gt_surface = ndimage.distance_transform_edt(~sg, sampling=spacing)
     min_vol = float(cfg["components"].get("min_component_volume_mm3", 100.0))
+    lateral_low_x = str(cfg["roi"]).upper().endswith("_R")
     missing_rows, missing_raw = component_rows(
-        missing, "missing", g, sg, d_to_gt_surface, spacing, min_vol, pid, cohort, domain
+        missing, "missing", g, sg, d_to_gt_surface, spacing, min_vol, pid, cohort, domain,
+        lateral_is_low_x=lateral_low_x,
     )
     excess_rows, excess_raw = component_rows(
-        excess, "excess", g, sg, d_to_gt_surface, spacing, min_vol, pid, cohort, domain
+        excess, "excess", g, sg, d_to_gt_surface, spacing, min_vol, pid, cohort, domain,
+        lateral_is_low_x=lateral_low_x,
     )
     real.update({
         "missing_component_count_raw": missing_raw,
@@ -815,7 +818,8 @@ def export_worker_task(args):
         return {"ok": False, "patient_id": pid, "error": repr(exc)}
 
 
-def plot_outputs(case_df: pd.DataFrame, component_df: pd.DataFrame, scale_df: pd.DataFrame, outdir: Path):
+def plot_outputs(case_df: pd.DataFrame, component_df: pd.DataFrame, scale_df: pd.DataFrame, outdir: Path,
+                 roi: str = "Lung_L"):
     figdir = outdir / "figures"
     figdir.mkdir(exist_ok=True)
 
@@ -823,9 +827,9 @@ def plot_outputs(case_df: pd.DataFrame, component_df: pd.DataFrame, scale_df: pd
     ax.scatter(case_df["missing_fraction_gt"], case_df["excess_fraction_gt"], alpha=0.8)
     lim = max(float(case_df["missing_fraction_gt"].max()), float(case_df["excess_fraction_gt"].max()), 0.01)
     ax.plot([0, lim], [0, lim], linestyle="--", linewidth=1)
-    ax.set_xlabel("Missing fraction of approved Lung_L")
-    ax.set_ylabel("Excess fraction of approved Lung_L")
-    ax.set_title("Real Lung_L missing vs excess error")
+    ax.set_xlabel(f"Missing fraction of approved {roi}")
+    ax.set_ylabel(f"Excess fraction of approved {roi}")
+    ax.set_title(f"Real {roi} missing vs excess error")
     fig.tight_layout(); fig.savefig(figdir / "missing_vs_excess.png", dpi=170); plt.close(fig)
 
     fig, ax = plt.subplots(figsize=(7.0, 5.5))
@@ -840,7 +844,7 @@ def plot_outputs(case_df: pd.DataFrame, component_df: pd.DataFrame, scale_df: pd
     ax.hist(vals, bins=min(18, max(6, int(math.sqrt(max(len(vals), 1))))))
     ax.set_xlabel("P95 |surface displacement| (mm)")
     ax.set_ylabel("Patients")
-    ax.set_title("Lung_L real surface-error severity")
+    ax.set_title(f"{roi} real surface-error severity")
     fig.tight_layout(); fig.savefig(figdir / "surface_displacement_p95_hist.png", dpi=170); plt.close(fig)
 
     if len(component_df):
@@ -876,7 +880,7 @@ def fmt_med_p90(df: pd.DataFrame, col: str, digits: int = 3) -> str:
 def write_report(outdir: Path, cfg: Mapping, case_df: pd.DataFrame, component_df: pd.DataFrame,
                  scale_df: pd.DataFrame, shortlist: pd.DataFrame, failures: pd.DataFrame):
     lines = [
-        "# Lung_L direct real-error field characterization",
+        f"# {cfg['roi']} direct real-error field characterization",
         "",
         "This report characterizes approved↔autoseg error directly. It does **not** fit patients to synthetic corruption families and it does not modify a training corruption distribution.",
         "",
@@ -1073,9 +1077,9 @@ def main():
         if export_failures:
             pd.DataFrame(export_failures).to_csv(outdir / "inspection_export_failures.csv", index=False)
 
-    plot_outputs(case_df, component_df, scale_df, outdir)
+    plot_outputs(case_df, component_df, scale_df, outdir, roi=str(cfg["roi"]))
     write_report(outdir, cfg, case_df, component_df, scale_df, shortlist, failure_df)
-    print(f"Wrote direct Lung_L error-field characterization to {outdir}")
+    print(f"Wrote direct {cfg['roi']} error-field characterization to {outdir}")
 
 
 if __name__ == "__main__":
