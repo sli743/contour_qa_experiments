@@ -27,5 +27,6 @@ export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export ITK_GLOBAL_DEFAULT_NUMBER_OF_THREADS=1
 
+# CONFIG may be overridden (e.g. the Lung_R fit config).
 python -m analysis.fit_lung_l_nsrqa_synthetic_severity_family_validated \
-  --config configs/dino_shape/lung_l_nsrqa_synthetic_severity_fit_family_validated.yaml
+  --config "${CONFIG:-configs/dino_shape/lung_l_nsrqa_synthetic_severity_fit_family_validated.yaml}"

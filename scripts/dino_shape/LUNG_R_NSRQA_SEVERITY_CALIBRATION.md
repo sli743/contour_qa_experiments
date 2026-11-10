@@ -33,3 +33,28 @@ CALIBRATED_CONFIG=/scratch/shaohan/contour_QA/lung_r_nsrqa_severity_calibration_
 STUDY_ROOT=/scratch/shaohan/contour_QA/lung_r_nsrqa_corruption_ablation_month_temporal_rcal_v1 \
 bash scripts/dino_shape/submit_lung_r_nsrqa_month_temporal_ablation.sh
 ```
+
+## v4: realized-metric fit (recommended over v1 severities)
+
+The v1 severities above produce corruptions ~10x milder than real errors
+(Lung_R synthetic 1-Dice P90 0.0024 vs real 0.023; HD99 P90 1.5 vs 8.8 mm).
+v4 reuses the Lung_L v3 family-validated fit (which on Lung_L Month 3 improved
+HD95 ranking: OOD one-sided p 0.085 -> 0.018) with two fixes:
+
+- dropout targets = each patient's deepest missing component >= 3 mm deep
+  (v3: largest component of any depth; mostly 1-voxel slivers, 17% no-op draws);
+- HD99 fitted with weight 1 (v3: audit only).
+
+```bash
+bash scripts/dino_shape/submit_lung_r_nsrqa_synthetic_severity_fit_v4.sh
+```
+
+Check `calibration_status.json` and `real_vs_synthetic_quantiles.csv`, then train
+with `best_fit_training_config.yaml` (written only if every family passes the
+<=5% no-op audit; otherwise `best_candidate_training_config.yaml`):
+
+```bash
+CALIBRATED_CONFIG=/scratch/shaohan/contour_QA/lung_r_nsrqa_synthetic_severity_fit_v4/best_fit_training_config.yaml \
+STUDY_ROOT=/scratch/shaohan/contour_QA/lung_r_nsrqa_corruption_ablation_month_temporal_fit_v4 \
+bash scripts/dino_shape/submit_lung_r_nsrqa_month_temporal_ablation.sh
+```

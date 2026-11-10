@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Fit Lung_L NSR-QA corruption severity to real approved/autoseg error metrics.
+"""Fit NSR-QA corruption severity to real approved/autoseg error metrics.
+
+Written for Lung_L (lung_l_nsrqa_synthetic_severity_fit_v3_family_validated);
+the config key ``roi`` (default Lung_L) selects another ROI, e.g. Lung_R.
+Optional dropout target filters (``dropout_component_calibration``:
+``target_selection`` largest|deepest, ``min_target_depth_mm``) default to the
+original behaviour.
 
 The corruption vocabulary and mixture probabilities are held fixed.  Three
 family-level severity multipliers are optimized:
@@ -184,7 +190,6 @@ def calibrate_dropout_from_real_components(
         raise KeyError(f"error_components.csv missing columns: {sorted(missing)}")
     x = component_df.copy()
     x = x[x["component_type"].astype(str).eq("missing")]
-    x = x[pd.to_numeric(x["component_rank_by_volume"], errors="coerce").eq(1)]
     if exclusions:
         x = x[~x["patient_id"].astype(int).isin(exclusions)]
     for col in (
@@ -193,6 +198,22 @@ def calibrate_dropout_from_real_components(
         "surface_footprint_fraction",
     ):
         x[col] = pd.to_numeric(x[col], errors="coerce")
+    # Original behaviour: the largest missing component per patient, any depth.
+    # Most of those are one-voxel (1.5 mm) slivers that the generator often
+    # cannot reproduce (no-op draws), so a depth floor and/or picking each
+    # patient's deepest qualifying component can be requested instead.
+    min_depth = float(calibration_cfg.get("min_target_depth_mm", 0.0))
+    if min_depth > 0:
+        x = x[x["max_depth_from_approved_surface_mm"] >= min_depth]
+    selection = str(calibration_cfg.get("target_selection", "largest"))
+    if selection == "largest":
+        x = x[pd.to_numeric(x["component_rank_by_volume"], errors="coerce").eq(1)]
+    elif selection == "deepest":
+        x = (x.sort_values(["patient_id", "max_depth_from_approved_surface_mm", "fraction_approved_volume"],
+                           ascending=[True, False, False])
+              .drop_duplicates("patient_id", keep="first"))
+    else:
+        raise ValueError(f"dropout_component_calibration.target_selection must be largest|deepest, got {selection}")
     x = x[
         np.isfinite(x["fraction_approved_volume"])
         & np.isfinite(x["max_depth_from_approved_surface_mm"])
@@ -217,7 +238,10 @@ def calibrate_dropout_from_real_components(
     }
     bounds = {}
     summary = {
-        "source": "largest significant penetrating missing component per training case",
+        "source": (f"{selection} significant penetrating missing component per training case"
+                   + (f", depth >= {min_depth:g} mm" if min_depth > 0 else "")),
+        "target_selection": selection,
+        "min_target_depth_mm": min_depth,
         "n_components": int(len(x)),
         "winsor_quantiles": [qlo, qhi],
     }
@@ -899,7 +923,7 @@ def plot_candidate_objectives(candidate_df: pd.DataFrame, outdir: Path) -> None:
     plt.plot(np.arange(len(good)), good["objective"].to_numpy(dtype=float), marker="o", linewidth=1)
     plt.xlabel("candidate rank")
     plt.ylabel("quantile-fit objective")
-    plt.title("Lung_L synthetic severity candidate fit")
+    plt.title("Synthetic severity candidate fit")
     plt.tight_layout()
     plt.savefig(outdir / "figures" / "candidate_objective_rank.png", dpi=180)
     plt.close()
@@ -927,7 +951,7 @@ def write_report(
     effective_clean = clean_prob + (1.0 - clean_prob) * noop_rate if np.isfinite(noop_rate) else float("nan")
 
     lines = [
-        "# Lung_L NSR-QA realized synthetic-severity fit",
+        f"# {cfg.get('roi', 'Lung_L')} NSR-QA realized synthetic-severity fit",
         "",
         "## Fixed experimental design",
         "",
@@ -948,7 +972,9 @@ def write_report(
         lines.append(f"- `{metric}`: {float(weight):g}{suffix}")
     lines += [
         "",
-        "For Lung_L, **HD95 is intentionally emphasized and HD99 has zero fitting weight**. HD99 remains in the final audit files and plots.",
+        ("**HD99 has zero fitting weight** (audit only); it remains in the final audit files and plots."
+         if float(fit_metrics.get("hd99_mm", 0.0)) == 0 else
+         f"**HD99 is fitted** (weight {float(fit_metrics['hd99_mm']):g}) alongside HD95 (weight {float(fit_metrics.get('hd95_mm', 0.0)):g})."),
         "",
         "Target quantiles:",
         "",
@@ -1135,13 +1161,15 @@ def main() -> None:
     best = candidate_df.iloc[0]
     multipliers = {k: float(best[f"scale_{k}"]) for k in ("smooth", "noise", "global")}
     best_cfg = config_with_multipliers(initial_cfg, multipliers, parameter_limits)
-    best_cfg["experiment_name"] = str(cfg["output"].get("recommended_experiment_name", "dino_shape_stochastic_region_dropout_Lung_L_metric_fit"))
+    best_cfg["experiment_name"] = str(cfg["output"].get("recommended_experiment_name", f"dino_shape_stochastic_region_dropout_{cfg.get('roi', 'Lung_L')}_metric_fit"))
     best_cfg.setdefault("study_metadata", {})["synthetic_severity_fit_objective"] = {
         "quantiles": [float(q) for q in cfg["objective"]["quantiles"]],
         "quantile_weights": cfg["objective"]["quantile_weights"],
         "metric_weights": cfg["objective"]["metric_weights"],
         "objective": float(best["objective"]),
-        "hd99_role": "audit_only_zero_fit_weight",
+        "hd99_role": ("audit_only_zero_fit_weight" if float(cfg["objective"]["metric_weights"].get("hd99_mm", 0.0)) == 0
+                      else "fitted"),
+        "severity_fit_roi": str(cfg.get("roi", "Lung_L")),
     }
     (outdir / "best_candidate_training_config.yaml").write_text(
         yaml.safe_dump(best_cfg, sort_keys=False)
@@ -1212,7 +1240,7 @@ def main() -> None:
                 int(pid),
                 labels[int(pid)],
                 cts[int(pid)],
-                bank_root / f"Lung_L_{stratum}" / f"patient_{pid}",
+                bank_root / f"{cfg.get('roi', 'Lung_L')}_{stratum}" / f"patient_{pid}",
                 best_cfg,
                 fitted_sev,
                 stratum,
