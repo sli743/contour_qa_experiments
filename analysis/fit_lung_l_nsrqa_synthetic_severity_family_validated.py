@@ -284,6 +284,12 @@ def calibrate_dropout_from_real_components(
     drop["empirical_max_depth_extra_mm"] = float(calibration_cfg.get("max_depth_extra_mm", 12.0))
     drop["max_attempts"] = int(calibration_cfg.get("max_attempts", 24))
     drop["threshold_search_steps"] = int(calibration_cfg.get("threshold_search_steps", 12))
+    # Topology handling for approved masks with stray islands (opt-in; absent keys
+    # leave the generator's defaults, i.e. the Lung_L v3 behaviour).
+    if "seed_on_largest_component" in calibration_cfg:
+        drop["seed_on_largest_component"] = bool(calibration_cfg["seed_on_largest_component"])
+    if "max_extra_remaining_components" in calibration_cfg:
+        drop["max_extra_remaining_components"] = int(calibration_cfg["max_extra_remaining_components"])
     out.setdefault("study_metadata", {})["dropout_component_calibration"] = summary
 
     audit_cols = [

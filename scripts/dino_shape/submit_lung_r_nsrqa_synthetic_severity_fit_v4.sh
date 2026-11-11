@@ -28,12 +28,13 @@ for f in "${EF}/case_error_field_summary.csv" "${EF}/error_components.csv" "${IN
   [[ -s "${f}" ]] || { echo "ERROR: missing ${f}" >&2; echo "Run submit_lung_r_nsrqa_severity_calibration.sh first." >&2; exit 2; }
 done
 mkdir -p "${OUT}"
+TAG="$(basename "${CONFIG}" .yaml)"; TAG="${TAG##*_fit_}"   # v4, v4b, ...
 
 JOB="$(sbatch --parsable -p hugo --account=geoffrey_hugo \
-  --job-name=lungR_sevfit_v4 \
+  --job-name="lungR_sevfit_${TAG}" \
   --export="ALL,REPO=${PROJECT_ROOT},CONFIG=${CONFIG}" \
   --output="${OUT}/slurm-%x-%j.out" --error="${OUT}/slurm-%x-%j.err" \
   jobs/lung_l_nsrqa_synthetic_severity_fit_family_validated.job)"
-echo "Submitted Lung_R severity fit v4: ${JOB%%;*}"
+echo "Submitted Lung_R severity fit ${TAG}: ${JOB%%;*}"
 echo "Output: ${OUT}"
 echo "  calibration_status.json (calibration_passed), real_vs_synthetic_quantiles.csv, report.md"

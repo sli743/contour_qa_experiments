@@ -42,11 +42,20 @@ def _cache_geometry(cache_key: str | None, target: np.ndarray, spacing_zyx: Sequ
     boundary_points = np.argwhere(boundary)
     if len(boundary_points) == 0:
         raise ValueError("Target has no boundary voxels.")
+    labels, count = ndimage.label(target, structure=_STRUCTURE_6)
+    if count > 1:
+        largest = labels == (1 + int(np.argmax(np.bincount(labels.ravel())[1:])))
+        largest_boundary_points = np.argwhere(boundary & largest)
+    else:
+        largest_boundary_points = boundary_points
     geometry = {
         "boundary_points": boundary_points,
+        # Seeds restricted to the main body: stray islands in an approved mask would
+        # otherwise confine the removed region to the island (a near no-op).
+        "largest_component_boundary_points": largest_boundary_points,
         "target_voxels": int(target.sum()),
         "depth_map_mm": ndimage.distance_transform_edt(target, sampling=spacing_zyx).astype(np.float32, copy=False),
-        "target_component_count": _component_count(target),
+        "target_component_count": int(count),
     }
     if cache_key:
         _TARGET_GEOMETRY_CACHE[cache_key] = geometry
@@ -301,7 +310,11 @@ def stochastic_region_dropout(
     # Worker-local target geometry cache survives across epochs for patients handled by this worker.
     t0 = time.perf_counter()
     geometry = _cache_geometry(cache_key, target, spacing_zyx)
-    boundary_points = geometry["boundary_points"]
+    # Opt-in (default off keeps earlier configs bit-identical).
+    if bool(spec.get("seed_on_largest_component", False)):
+        boundary_points = geometry["largest_component_boundary_points"]
+    else:
+        boundary_points = geometry["boundary_points"]
     target_voxels = int(geometry["target_voxels"])
     depth_map_mm = geometry["depth_map_mm"]
     target_component_count = int(geometry["target_component_count"])

@@ -58,3 +58,16 @@ CALIBRATED_CONFIG=/scratch/shaohan/contour_QA/lung_r_nsrqa_synthetic_severity_fi
 STUDY_ROOT=/scratch/shaohan/contour_QA/lung_r_nsrqa_corruption_ablation_month_temporal_fit_v4 \
 bash scripts/dino_shape/submit_lung_r_nsrqa_month_temporal_ablation.sh
 ```
+
+## v4b: dropout no-op fix
+
+The v4 audit failed (no `best_fit_training_config.yaml`): 32/150 dropout draws (21%) reverted
+to clean, concentrated on patients 65, 120, 165, 108, 122, 28, 37, 161. Cause: approved masks
+with stray islands (patient 120: 530,500-voxel lung + a 16-voxel island). A seed on an island
+removes ~1 voxel (depth rejection); any removal from the main body leaves 2 components, which
+the absolute limit `max_remaining_components: 1` rejects. v4b sets
+`seed_on_largest_component: true` and `max_extra_remaining_components: 0` (opt-in keys; old
+configs unchanged). Locally on patient 120: v4 settings 20/20 no-ops, v4b 0/20.
+
+    CONFIG=configs/dino_shape/lung_r_nsrqa_synthetic_severity_fit_v4b.yaml \
+      bash scripts/dino_shape/submit_lung_r_nsrqa_synthetic_severity_fit_v4.sh
