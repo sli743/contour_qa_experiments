@@ -6,6 +6,9 @@ STUDY_ROOT="${STUDY_ROOT:-/scratch/shaohan/contour_QA/lung_l_nsrqa_corruption_ab
 TASK_INDEX="${1:-${SLURM_ARRAY_TASK_ID:-}}"
 MODE="${MODE:-autoseg_centered}"
 ROI="${ROI:-Lung_L}"
+# CT+contour models only: IMAGE_MODE=absent re-runs the Month3 eval with every CT
+# pathway switched off (CT-reliance check) into evaluations/<arm>_ct_absent.
+IMAGE_MODE="${IMAGE_MODE:-present}"
 if [[ -z "${TASK_INDEX}" ]]; then
   echo "Usage: $0 TASK_INDEX (0..5)" >&2
   exit 2
@@ -28,10 +31,16 @@ SEED="${FIELDS[1]}"
 CONFIG="${FIELDS[2]}"
 CHECKPOINT="${FIELDS[3]}"
 INPUT_ROOT="${STUDY_ROOT}/actual_autoseg_preprocessed"
-OUT="${STUDY_ROOT}/evaluations/${ARM}/seed${SEED}"
+EVAL_ARM="${ARM}"
+IMAGE_ARGS=()
+if [[ "${IMAGE_MODE}" != "present" ]]; then
+  EVAL_ARM="${ARM}_ct_${IMAGE_MODE}"
+  IMAGE_ARGS=(--image-mode "${IMAGE_MODE}")
+fi
+OUT="${STUDY_ROOT}/evaluations/${EVAL_ARM}/seed${SEED}"
 mkdir -p "${OUT}"
 
-echo "[eval] task=${TASK_INDEX} roi=${ROI} arm=${ARM} seed=${SEED} mode=${MODE}"
+echo "[eval] task=${TASK_INDEX} roi=${ROI} arm=${ARM} seed=${SEED} mode=${MODE} image_mode=${IMAGE_MODE}"
 python -m evaluation.actual_autoseg.eval_actual_autoseg_nsrqa \
   --config "${CONFIG}" \
   --checkpoint "${CHECKPOINT}" \
@@ -40,8 +49,13 @@ python -m evaluation.actual_autoseg.eval_actual_autoseg_nsrqa \
   --mode "${MODE}" \
   --output-csv "${OUT}/actual_autoseg_testing.csv" \
   --case-output-root "${OUT}/actual_autoseg_cases" \
-  --model-name "${ARM}_seed${SEED}" \
-  --corruption-label "${ARM}"
+  --model-name "${EVAL_ARM}_seed${SEED}" \
+  --corruption-label "${ARM}" \
+  ${IMAGE_ARGS[@]+"${IMAGE_ARGS[@]}"}
+
+if [[ "${IMAGE_MODE}" != "present" ]]; then
+  exit 0  # the reliance check needs only the real-autoseg cases
+fi
 
 python -m evaluation.actual_autoseg.eval_clean_approved_reconstruction \
   --config "${CONFIG}" \

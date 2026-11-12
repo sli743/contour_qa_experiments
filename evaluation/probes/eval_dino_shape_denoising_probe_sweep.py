@@ -268,9 +268,12 @@ def reconstruct_binary(
     cf: Dict,
     threshold: float,
     spatial_context: torch.Tensor | None = None,
+    **image_kwargs,
 ) -> torch.Tensor:
+    # image_kwargs (image=..., image_present=...) are only passed for
+    # image-conditioned (CT + contour) models.
     return model.reconstruct(
-        x_in, threshold=float(threshold), spatial_context=spatial_context
+        x_in, threshold=float(threshold), spatial_context=spatial_context, **image_kwargs
     )
 
 

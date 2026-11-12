@@ -83,6 +83,29 @@ def spatial_context_for_case(cf: Dict, patient_id: str, input_img: sitk.Image, i
     values = {f"spatial_{name}": float(value) for name, value in zip(SPATIAL_CONTEXT_FEATURES, vec)}
     return tensor, values
 
+IMAGE_MODES = ("present", "absent")
+
+
+def image_kwargs_for_case(cf: Dict, ct_img: sitk.Image, device: torch.device, image_mode: str = "present") -> Dict:
+    """CT inputs for image-conditioned models; empty dict for contour-only models.
+
+    image_mode=absent switches every CT pathway off (CT-reliance check).
+    """
+    from models.dino_shape.dino_image_contour_autoencoder import image_conditioning_enabled, load_ct_tensor
+
+    if not image_conditioning_enabled(cf):
+        if image_mode != "present":
+            raise ValueError("--image-mode absent requires an image-conditioned config")
+        return {}
+    if image_mode not in IMAGE_MODES:
+        raise ValueError(f"image_mode must be one of {IMAGE_MODES}")
+    present = 1.0 if image_mode == "present" else 0.0
+    return {
+        "image": load_ct_tensor(ct_img, cf, device),
+        "image_present": torch.full((1,), present, device=device),
+    }
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--config", required=True)
@@ -105,6 +128,8 @@ def main() -> None:
     )
     p.add_argument("--model-name", default="NSR-QA")
     p.add_argument("--corruption-label", default="")
+    p.add_argument("--image-mode", choices=IMAGE_MODES, default="present",
+                   help="CT+contour models only: 'absent' disables all CT pathways (reliance check).")
     args = p.parse_args()
 
     cf = load_config(args.config)
@@ -160,7 +185,8 @@ def main() -> None:
             )
             with torch.no_grad():
                 recon = reconstruct_binary(
-                    model, x_in, cf, threshold, spatial_context=spatial_context
+                    model, x_in, cf, threshold, spatial_context=spatial_context,
+                    **image_kwargs_for_case(cf, ct_img, device, args.image_mode),
                 )
 
             spacing_zyx = tuple(float(v) for v in target_img.GetSpacing()[::-1])
@@ -230,6 +256,7 @@ def main() -> None:
                 **correction,
                 **spatial_values,
                 "threshold": threshold,
+                "image_mode": args.image_mode,
             }
             row["all_primary_metrics_finite"] = bool(all(np.isfinite(row[k]) for k in (
                 "true_1_minus_dice", "true_hd95_mm", "true_assd_mm", "true_relative_volume_difference",
@@ -259,6 +286,7 @@ def main() -> None:
         "roi": args.roi,
         "localization_mode": args.mode,
         "threshold": threshold,
+        "image_mode": args.image_mode,
         "n_rows": int(len(df)),
         "n_finite_rows": int(df["all_primary_metrics_finite"].sum()) if len(df) else 0,
         "metric_definitions": {

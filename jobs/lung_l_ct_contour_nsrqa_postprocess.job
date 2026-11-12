@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=lungL_ctc_post
+#SBATCH --partition=hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=32G
+#SBATCH --time=04:00:00
+#SBATCH --mail-type=ALL
+#SBATCH --mail-user=shaohan@wustl.edu
+set -euo pipefail
+PROJECT_ROOT="${PROJECT_ROOT:-/home/shaohan/contour_qa_experiments}"
+STUDY_ROOT="${STUDY_ROOT:-/scratch/shaohan/contour_QA/lung_l_ct_contour_nsrqa_v1}"
+V3_STUDY="${V3_STUDY:-/scratch/shaohan/contour_QA/lung_l_nsrqa_month_temporal_family_validated_v1}"
+NOCORR_STUDY="${NOCORR_STUDY:-/scratch/shaohan/contour_QA/lung_l_nsrqa_corruption_ablation_month_temporal_v1}"
+SEED="${SEED:-91}"
+cd "${PROJECT_ROOT}"
+source "${PROJECT_ROOT}/scripts/dino_shape/activate_3dino_env.sh"
+export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
+
+# Contour-only reference arms: link the existing Month3 evaluations (not retrained).
+EV="${STUDY_ROOT}/evaluations"
+mkdir -p "${EV}"
+ln -sfn "${V3_STUDY}/evaluations/nsrqa_corruption" "${EV}/contour_only_v3"
+ln -sfn "${NOCORR_STUDY}/evaluations/no_corruption" "${EV}/contour_only_no_corruption"
+
+ARMS=(ct_contour_corruption ct_contour_no_corruption ct_only_segmenter
+      ct_contour_corruption_ct_absent ct_contour_no_corruption_ct_absent
+      contour_only_v3 contour_only_no_corruption)
+for arm in "${ARMS[@]}"; do
+  [[ -d "${EV}/${arm}/seed${SEED}/actual_autoseg_cases" ]] || { echo "Missing evaluation: ${EV}/${arm}" >&2; exit 1; }
+done
+
+python -m analysis.score_nsrqa_floor_corrected \
+  --eval-root "${EV}" \
+  --arms "${ARMS[@]}" \
+  --reference-arm contour_only_no_corruption \
+  --seed "${SEED}" \
+  --roi Lung_L \
+  --watch 148,138,103,47,135 \
+  --output-dir "${STUDY_ROOT}/evaluations_floor_corrected/seed${SEED}"
+
+# Gate / CT-injection trajectory per CT arm, for quick inspection.
+for f in "${STUDY_ROOT}"/models/*/*/logs/image_guidance.csv; do
+  echo "== ${f}"; tail -n 3 "${f}"
+done

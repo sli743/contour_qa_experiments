@@ -27,6 +27,12 @@ import yaml
 from torch.utils.data import DataLoader, Dataset, get_worker_info
 
 from models.dino_shape.dino_shape_autoencoder import Frozen3DINOShapeAutoencoder
+from models.dino_shape.dino_image_contour_autoencoder import (
+    build_image_contour_model,
+    image_cfg,
+    image_conditioning_enabled,
+    load_ct_array,
+)
 from training.corruptions.nsrqa_corruption_dispatch import (
     apply_nsrqa_corruption,
     corruption_backend,
@@ -320,6 +326,54 @@ class CachedValidationROIDataset(Dataset):
         }
 
 
+class CTAttachedDataset(Dataset):
+    """Add the normalised CT crop (``image``) matching each item's patient id.
+
+    The roiwise CT crops share the label crop geometry, and the training pair
+    is not re-framed (candidate-centered training is rejected for image
+    conditioning), so the CT needs no transform.
+    """
+
+    def __init__(self, base: Dataset, ct_dir: str | Path, cfg: Dict):
+        self.base = base
+        self.cfg = cfg
+        ct_dir = Path(ct_dir)
+        files = sorted(ct_dir.rglob("*.nii.gz"))
+        if not files:
+            raise FileNotFoundError(f"No CT crops found under {ct_dir}")
+        self.ct_by_pid = {}
+        for path in files:
+            pid = patient_id_from_name(path.name)
+            if pid in self.ct_by_pid:
+                raise RuntimeError(f"Duplicate CT crops for patient {pid}: {self.ct_by_pid[pid]}, {path}")
+            self.ct_by_pid[pid] = path
+        missing = [patient_id_from_name(p.name) for p in base.files
+                   if patient_id_from_name(p.name) not in self.ct_by_pid]
+        if missing:
+            raise FileNotFoundError(f"{len(missing)} cases have no CT crop in {ct_dir}: {missing[:10]}")
+
+    def __len__(self):
+        return len(self.base)
+
+    @property
+    def files(self):
+        return self.base.files
+
+    def __getitem__(self, index):
+        item = dict(self.base[index])
+        t0 = time.perf_counter()
+        pid = str(item["patient_id"])
+        ct = load_ct_array(self.ct_by_pid[pid], self.cfg)
+        if tuple(ct.shape) != tuple(item["mask"].shape[1:]):
+            raise RuntimeError(
+                f"CT crop {tuple(ct.shape)} does not match mask {tuple(item['mask'].shape[1:])} "
+                f"for patient {pid}: {self.ct_by_pid[pid]}"
+            )
+        item["image"] = torch.from_numpy(ct)[None]
+        item["load_seconds"] = item["load_seconds"] + torch.tensor(time.perf_counter() - t0, dtype=torch.float64)
+        return item
+
+
 def worker_init_fn(worker_id: int):
     # Prevent 8 workers from each spawning their own large OpenMP/ITK pools.
     torch.set_num_threads(1)
@@ -427,6 +481,8 @@ def run_epoch(model, loader, optimizer, device, cfg, train: bool, epoch: int):
     accumulation = int(cfg["training"].get("accumulation_steps", 1))
     precision = cfg["training"].get("precision", "bf16")
     threshold = float(cfg.get("evaluation", {}).get("threshold", 0.5))
+    image_dropout = float(image_cfg(cfg).get("train_image_dropout", 0.0)) if image_conditioning_enabled(cfg) else 0.0
+    image_present_sum = 0.0
     timing_cfg = cfg["training"].get("timing", {})
     timing_enabled = bool(timing_cfg.get("enabled", True))
     sync_cuda = bool(timing_cfg.get("sync_cuda", True))
@@ -465,11 +521,27 @@ def run_epoch(model, loader, optimizer, device, cfg, train: bool, epoch: int):
         for meta in batch_metadata:
             corruption_rows.append({"epoch": epoch, "split": "train" if train else "validation", **meta})
 
+        image_kwargs = {}
+        if "image" in batch:
+            image = batch["image"].to(device, non_blocking=True)
+            n_batch = image.shape[0]
+            if train and image_dropout > 0:
+                present = (torch.rand(n_batch, device=device) >= image_dropout).float()
+            else:
+                present = torch.ones(n_batch, device=device)
+            image_present_sum += float(present.sum())
+            split_tag = "train" if train else "validation"
+            image_kwargs = {
+                "image": image,
+                "image_present": present,
+                "image_cache_keys": [f"{split_tag}:{pid}" for pid in batch["patient_id"]],
+            }
+
         with torch.set_grad_enabled(train):
             _cuda_sync(device, timing_enabled and sync_cuda)
             t0 = time.perf_counter()
             with amp_context(device, precision):
-                logits, _ = model(corrupted, spatial_context=spatial_context)
+                logits, _ = model(corrupted, spatial_context=spatial_context, **image_kwargs)
             _cuda_sync(device, timing_enabled and sync_cuda)
             timing["forward_seconds"] += time.perf_counter() - t0
 
@@ -536,6 +608,7 @@ def run_epoch(model, loader, optimizer, device, cfg, train: bool, epoch: int):
         timing["cuda_peak_allocated_gb"] = torch.cuda.max_memory_allocated(device) / 2**30
         timing["cuda_peak_reserved_gb"] = torch.cuda.max_memory_reserved(device) / 2**30
     metrics_out = {k: totals[k] / totals["n"] for k in keys}
+    timing["image_present_fraction"] = image_present_sum / max(totals["n"], 1)
     return metrics_out, corruption_rows, timing
 
 
@@ -643,8 +716,16 @@ def main():
     with open(experiment_dir / "resolved_config.yaml", "w", encoding="utf-8") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)
 
+    use_image = image_conditioning_enabled(cfg)
+    if use_image and bool((cfg.get("reference_frame_training") or {}).get("candidate_centered", False)):
+        raise ValueError(
+            "image_conditioning does not support reference_frame_training.candidate_centered: "
+            "the CT crop would need the same per-corruption shift."
+        )
     train_ds = CorruptedROIDataset(cfg["data"]["train_label_dir"], cfg, train=True)
     raw_val_ds = CorruptedROIDataset(cfg["data"]["validation_label_dir"], cfg, train=False)
+    if use_image:
+        train_ds = CTAttachedDataset(train_ds, cfg["data"]["train_ct_dir"], cfg)
     requested_workers = int(cfg["training"].get("num_workers", 8))
     available_cpus = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
     workers = max(0, min(requested_workers, available_cpus))
@@ -678,22 +759,27 @@ def main():
         val_ds = CachedValidationROIDataset(cfg["data"]["validation_label_dir"], cache_root)
     else:
         val_ds = raw_val_ds
+    if use_image:
+        val_ds = CTAttachedDataset(val_ds, cfg["data"]["validation_ct_dir"], cfg)
     val_loader = DataLoader(
         val_ds, batch_size=1, shuffle=False, **loader_kwargs
     )
 
     device = torch.device(cfg.get("training", {}).get("device", "cuda:0") if torch.cuda.is_available() else "cpu")
-    model = Frozen3DINOShapeAutoencoder(
-        repo_path=cfg["dino"]["repo_path"],
-        checkpoint_path=cfg["dino"]["checkpoint_path"],
-        config_name=cfg["dino"].get("config_name", "train/vit3d_highres"),
-        decoder_channels=cfg["decoder"].get("channels", [256, 128, 64, 32]),
-        spatial_context_dim=(
-            int((cfg.get("spatial_conditioning") or {}).get("context_dim", len(SPATIAL_CONTEXT_FEATURES)))
-            if bool((cfg.get("spatial_conditioning") or {}).get("enabled", False)) else 0
-        ),
-        spatial_context_hidden_dim=int((cfg.get("spatial_conditioning") or {}).get("hidden_dim", 64)),
-    ).to(device)
+    if use_image:
+        model = build_image_contour_model(cfg).to(device)
+    else:
+        model = Frozen3DINOShapeAutoencoder(
+            repo_path=cfg["dino"]["repo_path"],
+            checkpoint_path=cfg["dino"]["checkpoint_path"],
+            config_name=cfg["dino"].get("config_name", "train/vit3d_highres"),
+            decoder_channels=cfg["decoder"].get("channels", [256, 128, 64, 32]),
+            spatial_context_dim=(
+                int((cfg.get("spatial_conditioning") or {}).get("context_dim", len(SPATIAL_CONTEXT_FEATURES)))
+                if bool((cfg.get("spatial_conditioning") or {}).get("enabled", False)) else 0
+            ),
+            spatial_context_hidden_dim=int((cfg.get("spatial_conditioning") or {}).get("hidden_dim", 64)),
+        ).to(device)
 
     if any(parameter.requires_grad for parameter in model.encoder.parameters()):
         raise RuntimeError("3DINO encoder must remain frozen for this experiment.")
@@ -703,6 +789,17 @@ def main():
         weight_decay=float(cfg["training"].get("weight_decay", 1e-4)))
 
     print(f"Experiment: {cfg['experiment_name']}")
+    if use_image:
+        icfg = image_cfg(cfg)
+        print("Image conditioning: " + json.dumps({k: icfg[k] for k in sorted(icfg) if k != "enabled"}))
+        # Read the CT directly: indexing train_ds here would seed the
+        # per-worker corruption RNG in the parent process.
+        probe_path = next(iter(train_ds.ct_by_pid.values()))
+        probe_img = sitk.ReadImage(str(probe_path))
+        probe = load_ct_array(probe_img, cfg)
+        print(f"CT input check ({probe_path.name}, pixel={probe_img.GetPixelIDTypeAsString()}): "
+              f"normalised min={float(probe.min()):.3f} "
+              f"max={float(probe.max()):.3f} mean={float(probe.mean()):.3f}", flush=True)
     print(f"Corruption backend: {backend}")
     print(f"Train/validation cases: {len(train_ds)}/{len(val_ds)}")
     print(f"Frozen encoder params: {sum(p.numel() for p in model.encoder.parameters()):,}")
@@ -872,6 +969,11 @@ def main():
                     tw.writeheader()
                 tw.writerow(timing_row)
             print("[epoch timing] " + json.dumps(timing_row), flush=True)
+            if use_image:
+                guidance_row = {"epoch": epoch, **model.decoder.stats(),
+                                "train_image_present_fraction": tr_timing["image_present_fraction"]}
+                append_csv_row(log_dir / "image_guidance.csv", guidance_row)
+                print("[image guidance] " + json.dumps(guidance_row), flush=True)
 
             row = {"epoch": epoch, **{f"train_{k}": v for k, v in tr.items()},
                    **{f"validation_{k}": v for k, v in va.items()}}

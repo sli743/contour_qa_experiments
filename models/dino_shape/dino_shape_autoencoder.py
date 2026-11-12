@@ -246,12 +246,22 @@ class BinaryMaskDecoder3D(nn.Module):
             *[ResidualRefine3D(channels[-1], channels[-1]) for _ in range(blocks_per_stage)]
         )
         self.output = nn.Conv3d(channels[-1], int(output_channels), 1)
+        self.channels = channels
+
+    def stage_input_channels(self, step_index: int) -> int:
+        """Channel count entering upsampling step ``step_index``."""
+        return self.channels[step_index] if step_index < len(self.channels) - 1 else self.channels[-1]
+
+    def _before_stage(self, x: torch.Tensor, step_index: int, n_steps: int, **stage_kwargs) -> torch.Tensor:
+        """Hook for subclasses (e.g. image guidance); identity here."""
+        return x
 
     def forward(
         self,
         feature_grid: torch.Tensor,
         output_size_zyx: Sequence[int],
         spatial_context: torch.Tensor | None = None,
+        **stage_kwargs,
     ) -> torch.Tensor:
         x = self.projection(feature_grid)
         if self.spatial_conditioner is not None:
@@ -280,11 +290,12 @@ class BinaryMaskDecoder3D(nn.Module):
             # Remaining stages reuse final refinement block.
             blocks = blocks + [self.final_refine] * (len(sizes) - len(blocks))
 
-        for size, block in zip(sizes, blocks):
+        for step_index, (size, block) in enumerate(zip(sizes, blocks)):
             dtype = x.dtype
             x = F.interpolate(
                 x.float(), size=size, mode="trilinear", align_corners=False
             ).to(dtype=dtype)
+            x = self._before_stage(x, step_index, len(sizes), **stage_kwargs)
             x = block(x)
 
         if x.shape[2:] != target:
@@ -369,7 +380,15 @@ def load_trained_dino_shape_model(
     decoder_checkpoint: str | Path,
     device: torch.device | str,
 ) -> Frozen3DINOShapeAutoencoder:
-    """Build the frozen encoder and load a trained contour decoder."""
+    """Build the frozen encoder and load a trained contour decoder.
+
+    Configs with ``image_conditioning.enabled: true`` load the CT+contour
+    variant (models/dino_shape/dino_image_contour_autoencoder.py) instead.
+    """
+    if bool((config.get("image_conditioning") or {}).get("enabled", False)):
+        from models.dino_shape.dino_image_contour_autoencoder import load_trained_image_contour_model
+
+        return load_trained_image_contour_model(config, decoder_checkpoint, device)
     dino_cfg = config["dino"]
     decoder_cfg = config.get("decoder", {})
     model = Frozen3DINOShapeAutoencoder(

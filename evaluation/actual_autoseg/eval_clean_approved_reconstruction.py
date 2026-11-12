@@ -31,6 +31,7 @@ import torch
 from analysis.spinalcord_diagnostic_utils import pair_metrics, read_binary_lps
 from evaluation.actual_autoseg.eval_actual_autoseg_nsrqa import (
     finite_or_none,
+    image_kwargs_for_case,
     read_binary,
     same_geometry,
     spatial_context_for_case,
@@ -95,7 +96,8 @@ def main() -> None:
             )
             with torch.no_grad():
                 recon = reconstruct_binary(
-                    model, x_clean, cf, threshold, spatial_context=spatial_context
+                    model, x_clean, cf, threshold, spatial_context=spatial_context,
+                    **image_kwargs_for_case(cf, ct_img, device),
                 )
 
             out_case = output_base / args.mode / args.roi / split / f"patient_{pid}"
