@@ -37,7 +37,17 @@ python -m analysis.score_nsrqa_floor_corrected \
   --seed "${SEED}" \
   --roi Lung_L \
   --watch 148,138,103,47,135 \
+  --depth-thresholds 3,4.5,5.25,6,7.5 \
   --output-dir "${STUDY_ROOT}/evaluations_floor_corrected/seed${SEED}"
+
+# Per-arm depth-threshold calibration (label-free clean-floor rule + supervised check).
+python -m analysis.calibrate_nsrqa_depth_threshold \
+  --eval-root "${EV}" \
+  --arms "${ARMS[@]}" \
+  --seed "${SEED}" \
+  --roi Lung_L \
+  --watch 148,138,103,47,135 \
+  --output-dir "${STUDY_ROOT}/evaluations_floor_corrected/seed${SEED}_depth_sweep"
 
 # Gate / CT-injection trajectory per CT arm, for quick inspection.
 for f in "${STUDY_ROOT}"/models/*/*/logs/image_guidance.csv; do

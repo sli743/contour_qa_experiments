@@ -69,7 +69,8 @@ def disagreement_scores(inp: np.ndarray, ref: np.ndarray, vml: float, prefix: st
 
 
 def change_depth_scores(inp: np.ndarray, rec: np.ndarray, spacing_zyx: tuple, vml: float,
-                        min_component_ml: float, prefix: str = "qa") -> dict:
+                        min_component_ml: float, prefix: str = "qa",
+                        thresholds: tuple = (3.0, 4.5, 6.0)) -> dict:
     """HD-style scores on the network's change, robust to the thin reconstruction shell.
 
     Each removed voxel (inp & ~rec) gets its distance to the reconstruction and each
@@ -99,7 +100,7 @@ def change_depth_scores(inp: np.ndarray, rec: np.ndarray, spacing_zyx: tuple, vm
     d = np.concatenate(depth_parts)
     out[f"{prefix}_change_maxdepth_mm"] = float(d.max()) if d.size else 0.0
     out[f"{prefix}_change_p99depth_mm"] = float(np.percentile(d, 99)) if d.size else 0.0
-    for t in (3.0, 4.5, 6.0):
+    for t in thresholds:
         out[f"{prefix}_change_deep{t:g}_ml"] = float((d >= t - 1e-6).sum() * vml)
     comp_max.sort(reverse=True)
     out[f"{prefix}_change_top3depth_sum_mm"] = float(sum(comp_max[:3]))
@@ -163,8 +164,12 @@ def main() -> None:
                     help="comma-separated patient ids of notable shape cases; adds precision@k against them")
     ap.add_argument("--min-component-ml", type=float, default=0.05,
                     help="drop change components smaller than this before depth scores")
+    ap.add_argument("--depth-thresholds", default="3,4.5,6",
+                    help="comma-separated mm thresholds for qa_change_deep<t>_ml; calibrate per arm with "
+                         "analysis.calibrate_nsrqa_depth_threshold")
     ap.add_argument("--output-dir", required=True)
     args = ap.parse_args()
+    depth_thresholds = tuple(float(t) for t in args.depth_thresholds.split(","))
 
     eval_root = Path(args.eval_root)
     out_dir = Path(args.output_dir)
@@ -203,7 +208,8 @@ def main() -> None:
             row["true_error_ml"] = float((inp ^ app).sum() * vml)
             row.update({k: true_err[k] for k in ("true_thick1_ml", "true_thick1_maxcc_ml")})
             row.update(disagreement_scores(inp, rec, vml, "qa"))
-            row.update(change_depth_scores(inp, rec, spacing_zyx, vml, args.min_component_ml))
+            row.update(change_depth_scores(inp, rec, spacing_zyx, vml, args.min_component_ml,
+                                           thresholds=depth_thresholds))
             if arm != args.reference_arm and pid in ref_cases:
                 ref_rec = load(ref_cases[pid] / "nsrqa_reconstruction.nii.gz")
                 row["xarm_1_minus_dice"] = one_minus_dice(rec, ref_rec)
@@ -229,7 +235,7 @@ def main() -> None:
     score_cols = [
         "qa_1_minus_dice", "qa_hd95_mm", "qa_hd99_mm", "qa_max_hd_mm",
         "qa_change_maxdepth_mm", "qa_change_p99depth_mm", "qa_change_top3depth_sum_mm",
-        "qa_change_deep3_ml", "qa_change_deep4.5_ml", "qa_change_deep6_ml",
+        *[f"qa_change_deep{t:g}_ml" for t in depth_thresholds],
         "qa_removed_maxdepth_mm", "qa_added_maxdepth_mm",
         "qa_removed_deep3_ml", "qa_added_deep3_ml",
         "qa_thick1_ml", "qa_thick1_maxcc_ml", "qa_thick2_ml", "qa_thick2_maxcc_ml",
