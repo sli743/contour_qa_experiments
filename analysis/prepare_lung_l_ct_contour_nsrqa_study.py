@@ -111,6 +111,9 @@ def main() -> None:
     ap.add_argument("--arms", nargs="+", default=list(ARMS), choices=ARMS)
     ap.add_argument("--epochs", type=int, default=None,
                     help="Override training.num_epochs (smoke runs only).")
+    ap.add_argument("--per-seed-files", action="store_true",
+                    help="write experiment_manifest_seed<S>.csv / experiment_metadata_seed<S>.json "
+                         "so extra seeds can share the study root without clobbering seed 91")
     args = ap.parse_args()
 
     source = yaml.safe_load(Path(args.source_config).read_text(encoding="utf-8"))
@@ -158,11 +161,13 @@ def main() -> None:
         })
         print(f"[{idx}] {arm}: {cfg_path}")
 
-    with (study / "experiment_manifest.csv").open("w", newline="", encoding="utf-8") as f:
+    tag = f"_seed{args.seed}" if args.per_seed_files else ""
+    manifest = study / f"experiment_manifest{tag}.csv"
+    with manifest.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         w.writeheader()
         w.writerows(rows)
-    (study / "experiment_metadata.json").write_text(json.dumps({
+    (study / f"experiment_metadata{tag}.json").write_text(json.dumps({
         "source_config": str(Path(args.source_config).resolve()),
         "source_actual_autoseg": str(src),
         "seed": args.seed,
@@ -170,7 +175,7 @@ def main() -> None:
         "ct_crop_audit": audit,
         "image_conditioning_defaults": IMAGE_CONDITIONING,
     }, indent=2) + "\n", encoding="utf-8")
-    print(f"Wrote {study / 'experiment_manifest.csv'}")
+    print(f"Wrote {manifest}")
 
 
 if __name__ == "__main__":

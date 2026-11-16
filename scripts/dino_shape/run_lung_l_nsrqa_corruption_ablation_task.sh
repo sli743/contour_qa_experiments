@@ -10,7 +10,8 @@ if [[ -z "${TASK_INDEX}" ]]; then
 fi
 
 cd "${PROJECT_ROOT}"
-MANIFEST="${STUDY_ROOT}/experiment_manifest.csv"
+# MANIFEST override: extra seeds use experiment_manifest_seed<S>.csv
+MANIFEST="${MANIFEST:-${STUDY_ROOT}/experiment_manifest.csv}"
 if [[ ! -f "${MANIFEST}" ]]; then
   echo "Missing experiment manifest: ${MANIFEST}" >&2
   exit 1

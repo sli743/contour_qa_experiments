@@ -53,3 +53,16 @@ Scores land in `<study>/evaluations_floor_corrected/seed91/<arm>_floor_corrected
 - **Depth threshold.** The CT arms follow input detail closely, so the deep-change threshold is calibrated per arm (`analysis/calibrate_nsrqa_depth_threshold.py`; label-free rule: smallest depth whose clean-approved p90 deep volume is <= 0.5 mL). Seed 91: 5.25 mm for CT + contour, 7.5 mm for contour only. The postprocess job scores 3/4.5/5.25/6/7.5 mm.
 - **Out-of-scan padding.** Some crops reach past the scan's superior/inferior end and are padded with constant -1024 HU slices, which look like air. The CT + corruption model grows lung into that padding or carves the flat face where the scan cuts the lung (Lung_L 76, 95). All deep-change scores now ignore change in padded slices and within `--fov-margin-mm` (default 4.5 mm) of them; `-1` disables. Applies to every arm, contour only included. 4/56 Month3 cases are affected.
 - **Ablation.** `analysis/ablation_corruption_ct.py` (2x2 corruption x CT, paired bootstrap), `analysis/plot_ablation_corruption_ct.py`, `analysis/inspect_ablation_cases.py` (rule-picked patients, deep change on/off the true error).
+
+## Extra seeds for the 2x2 ablation
+
+```bash
+SEEDS="92 93" bash scripts/dino_shape/submit_lung_l_ct_contour_ablation_seeds.sh
+```
+
+- **What it trains:** all five models for each seed. In the contour-only study that is `nsrqa_corruption` and `no_corruption`; in the CT study it is the three CT arms. The two CT + contour arms are also re-evaluated with CT absent.
+- **Postprocess:** each seed then gets its own scoring and ablation (`seed<S>_ablation`).
+- **Configs:** prepared inline with `--per-seed-files`. Each seed writes its own `experiment_manifest_seed<S>.csv`, so seed 91's files and the Month3 inputs are reused untouched. The task runners pick the manifest up through the `MANIFEST` env var.
+- **C0I0 source:** for the extra seeds, C0I0 is the family-validated study's `no_corruption` arm. For seed 91 it was the earlier month-temporal ablation's arm. Both are identity training (clean_probability 1.0) on the same data.
+- **Links:** the postprocess job now links the contour-only arms one seed at a time. On first run it converts the old whole-arm links.
+- **Pooling:** `analysis/ablation_corruption_ct_seeds.py` combines the per-seed results. The CI is a paired patient bootstrap of the seed mean; the seed SD gives training variance. The output keeps the same layout, so `plot_ablation_corruption_ct.py` plots it unchanged.

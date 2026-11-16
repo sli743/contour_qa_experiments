@@ -4,7 +4,7 @@
 #SBATCH --account=geoffrey_hugo
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=32G
-#SBATCH --time=04:00:00
+#SBATCH --time=08:00:00
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=shaohan@wustl.edu
 set -euo pipefail
@@ -17,11 +17,22 @@ cd "${PROJECT_ROOT}"
 source "${PROJECT_ROOT}/scripts/dino_shape/activate_3dino_env.sh"
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
 
-# Contour-only reference arms: link the existing Month3 evaluations (not retrained).
+# Contour-only reference arms: link their Month3 evaluations per seed.
+# Seed 91's no-corruption arm lives in NOCORR_STUDY; extra seeds train it in
+# V3_STUDY (submit_lung_l_ct_contour_ablation_seeds.sh sets NOCORR_STUDY=V3_STUDY).
 EV="${STUDY_ROOT}/evaluations"
 mkdir -p "${EV}"
-ln -sfn "${V3_STUDY}/evaluations/nsrqa_corruption" "${EV}/contour_only_v3"
-ln -sfn "${NOCORR_STUDY}/evaluations/no_corruption" "${EV}/contour_only_no_corruption"
+link_seed() {  # link_seed <arm name in EV> <source arm dir>
+  local dst="${EV}/$1" src="$2" old s
+  if [[ -L "${dst}" ]]; then  # older layout: whole-arm symlink -> per-seed links
+    old="$(readlink -f "${dst}")"; rm "${dst}"; mkdir -p "${dst}"
+    for s in "${old}"/seed*; do [[ -e "${s}" ]] && ln -sfn "${s}" "${dst}/$(basename "${s}")"; done
+  fi
+  mkdir -p "${dst}"
+  ln -sfn "${src}/seed${SEED}" "${dst}/seed${SEED}"
+}
+link_seed contour_only_v3 "${V3_STUDY}/evaluations/nsrqa_corruption"
+link_seed contour_only_no_corruption "${NOCORR_STUDY}/evaluations/no_corruption"
 
 ARMS=(ct_contour_corruption ct_contour_no_corruption ct_only_segmenter
       ct_contour_corruption_ct_absent ct_contour_no_corruption_ct_absent
@@ -49,7 +60,12 @@ python -m analysis.calibrate_nsrqa_depth_threshold \
   --watch 148,138,103,47,135 \
   --output-dir "${STUDY_ROOT}/evaluations_floor_corrected/seed${SEED}_depth_sweep"
 
+# 2x2 corruption x CT ablation for this seed (aggregate seeds with
+# analysis.ablation_corruption_ct_seeds once all seeds are done).
+python -m analysis.ablation_corruption_ct   --cell C0I0="${EV}/contour_only_no_corruption"   --cell C1I0="${EV}/contour_only_v3"   --cell C0I1="${EV}/ct_contour_no_corruption"   --cell C1I1="${EV}/ct_contour_corruption"   --extra C1I1_ct_absent="${EV}/ct_contour_corruption_ct_absent@C1I1"   --extra C0I1_ct_absent="${EV}/ct_contour_no_corruption_ct_absent@C0I1"   --extra ct_only="${EV}/ct_only_segmenter"   --seed "${SEED}" --roi Lung_L   --watch 148,138,103,47,135   --output-dir "${STUDY_ROOT}/evaluations_floor_corrected/seed${SEED}_ablation"
+python -m analysis.plot_ablation_corruption_ct   --ablation-dir "${STUDY_ROOT}/evaluations_floor_corrected/seed${SEED}_ablation"
+
 # Gate / CT-injection trajectory per CT arm, for quick inspection.
-for f in "${STUDY_ROOT}"/models/*/*/logs/image_guidance.csv; do
+for f in "${STUDY_ROOT}"/models/*/*seed${SEED}/logs/image_guidance.csv; do
   echo "== ${f}"; tail -n 3 "${f}"
 done

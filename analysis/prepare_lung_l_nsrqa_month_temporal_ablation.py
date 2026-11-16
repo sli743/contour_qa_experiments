@@ -55,6 +55,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--study-root", required=True)
     p.add_argument("--seed", type=int, default=91)
     p.add_argument("--roi", default="Lung_L", help="Target ROI; must match the temporal reference config")
+    p.add_argument("--per-seed-files", action="store_true",
+                   help="write experiment_manifest_seed<S>.csv / experiment_metadata_seed<S>.json "
+                        "so extra seeds can share the study root without clobbering seed 91")
     return p.parse_args()
 
 
@@ -189,7 +192,8 @@ def main() -> None:
     if int(c0["seed"]) != int(c1["seed"]):
         raise RuntimeError("Ablation arms do not share the same seed")
 
-    manifest = study_root / "experiment_manifest.csv"
+    tag = f"_seed{seed}" if args.per_seed_files else ""
+    manifest = study_root / f"experiment_manifest{tag}.csv"
     write_manifest(rows, manifest)
 
     metadata = {
@@ -221,7 +225,7 @@ def main() -> None:
             "but now means the Month3 temporal holdout rather than the legacy random 15% test split."
         ),
     }
-    (study_root / "experiment_metadata.json").write_text(
+    (study_root / f"experiment_metadata{tag}.json").write_text(
         json.dumps(metadata, indent=2) + "\n", encoding="utf-8"
     )
 

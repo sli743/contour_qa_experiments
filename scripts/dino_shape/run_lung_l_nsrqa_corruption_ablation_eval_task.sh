@@ -15,7 +15,8 @@ if [[ -z "${TASK_INDEX}" ]]; then
 fi
 
 cd "${PROJECT_ROOT}"
-MANIFEST="${STUDY_ROOT}/experiment_manifest.csv"
+# MANIFEST override: extra seeds use experiment_manifest_seed<S>.csv
+MANIFEST="${MANIFEST:-${STUDY_ROOT}/experiment_manifest.csv}"
 readarray -t FIELDS < <(python - "${MANIFEST}" "${TASK_INDEX}" <<'PY'
 import csv, sys
 path, idx = sys.argv[1], int(sys.argv[2])
