@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import pandas as pd  # noqa: E402
 
 SURFACE, INK, INK2, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e4e3df"
-SERIES = {"I0": ("No CT (contour only)", "#2a78d6", "o"), "I1": ("CT + contour", "#eb6834", "s")}
+SERIES = {"I0": ("Contour only", "#2a78d6", "o"), "I1": ("CT + contour", "#eb6834", "s")}
 
 PANELS = [
     ("rho_deep_common_ml", "Deep change ≥ 4.5 mm", "Spearman ρ vs true error", True),
