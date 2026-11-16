@@ -66,3 +66,22 @@ SEEDS="92 93" bash scripts/dino_shape/submit_lung_l_ct_contour_ablation_seeds.sh
 - **C0I0 source:** for the extra seeds, C0I0 is the family-validated study's `no_corruption` arm. For seed 91 it was the earlier month-temporal ablation's arm. Both are identity training (clean_probability 1.0) on the same data.
 - **Links:** the postprocess job now links the contour-only arms one seed at a time. On first run it converts the old whole-arm links.
 - **Pooling:** `analysis/ablation_corruption_ct_seeds.py` combines the per-seed results. The CI is a paired patient bootstrap of the seed mean; the seed SD gives training variance. The output keeps the same layout, so `plot_ablation_corruption_ct.py` plots it unchanged.
+
+## Lung_R
+
+Same 2x2 design and code, with Lung_R's own corruption calibration.
+
+- Corruption: `configs/dino_shape/lung_r_nsrqa_synthetic_severity_fit_v3method.yaml`,
+  exactly the Lung_L v3 fit method (same families, search, validity rules,
+  dropout targets and objective) run on Lung_R error fields and Month1+2 masks.
+  As for Lung_L, the fit's `best_candidate_training_config.yaml` is used even if
+  the dropout no-op audit fails (Lung_L v3: 17% no-op). v4/v4b deviate from the
+  Lung_L method and are not used here.
+- Studies: contour-only `lung_r_nsrqa_month_temporal_family_validated_v1`,
+  CT `lung_r_ct_contour_nsrqa_v1`; seeds 91, 92, 93 all trained by the seed submitter.
+
+```bash
+bash scripts/dino_shape/submit_lung_r_ct_contour_stage1.sh          # fit -> prepare
+# after the prepare job finishes:
+ROI=Lung_R bash scripts/dino_shape/submit_lung_l_ct_contour_ablation_seeds.sh
+```

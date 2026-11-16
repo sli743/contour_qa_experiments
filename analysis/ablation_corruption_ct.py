@@ -353,7 +353,7 @@ def main() -> None:
     (out / "ablation_metadata.json").write_text(json.dumps({
         "arms": {a: {"path": str(p), "threshold_from": par, "calibrated_threshold_mm": thr[a]} for a, (p, par) in arms.items()},
         "combine": combos,
-        "n_patients": n, "top_k": args.top_k, "bootstrap": args.bootstrap, "seed": args.seed,
+        "n_patients": n, "top_k": args.top_k, "bootstrap": args.bootstrap, "seed": args.seed, "roi": args.roi,
         "floor_rule": f"clean p{args.floor_percentile:g} deep volume <= {args.floor_ml} mL",
         "common_threshold_mm": args.common_threshold, "relevance": "top-k true_thick1_ml",
         "fov_margin_mm": args.fov_margin_mm,

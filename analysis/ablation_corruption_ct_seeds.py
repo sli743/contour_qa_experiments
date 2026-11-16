@@ -50,7 +50,7 @@ def main() -> None:
     out = Path(args.output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
-    seeds, recorded = {}, {}
+    seeds, recorded, rois = {}, {}, set()
     for spec in args.ablation_dir:
         lab, _, path = spec.partition("=")
         pc = pd.read_csv(Path(path) / "per_case.csv", dtype={"patient_id": str})
@@ -58,11 +58,16 @@ def main() -> None:
             raise SystemExit(f"{path}/per_case.csv has no calibrated scores; rerun ablation_corruption_ct")
         seeds[lab] = pc
         meta = Path(path) / "ablation_metadata.json"
-        recorded[lab] = json.loads(meta.read_text()).get("combine", {}) if meta.exists() else {}
+        mj = json.loads(meta.read_text()) if meta.exists() else {}
+        recorded[lab] = mj.get("combine", {})
+        rois.add(mj.get("roi", "Lung_L"))
     arms = sorted(set.intersection(*[set(pc.arm) for pc in seeds.values()]),
                   key=lambda a: (a not in CELLS, CELLS.index(a) if a in CELLS else 0, a))
     if not set(CELLS) <= set(arms):
         raise SystemExit("every seed needs all four cells")
+    if len(rois) != 1:
+        raise SystemExit(f"seed dirs come from different ROIs: {sorted(rois)}")
+    roi = rois.pop()
     if args.combine is not None:
         combos = parse_combos(args.combine, arms)
     else:
@@ -161,7 +166,7 @@ def main() -> None:
     pd.DataFrame(eff_seed_rows).to_csv(out / "ablation_effects_per_seed.csv", index=False)
     (out / "ablation_metadata.json").write_text(json.dumps({
         "seeds": {s: str(p.partition("=")[2]) for s, p in zip(seeds, args.ablation_dir)},
-        "n_patients": n, "top_k": args.top_k, "bootstrap": args.bootstrap, "combine": combos,
+        "n_patients": n, "top_k": args.top_k, "bootstrap": args.bootstrap, "combine": combos, "roi": roi,
         "ci": "paired patient bootstrap of the seed-mean (case sampling); seed_sd = training spread",
     }, indent=2))
 

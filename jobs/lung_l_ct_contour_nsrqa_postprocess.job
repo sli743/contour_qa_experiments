@@ -9,9 +9,19 @@
 #SBATCH --mail-user=shaohan@wustl.edu
 set -euo pipefail
 PROJECT_ROOT="${PROJECT_ROOT:-/home/shaohan/contour_qa_experiments}"
-STUDY_ROOT="${STUDY_ROOT:-/scratch/shaohan/contour_QA/lung_l_ct_contour_nsrqa_v1}"
-V3_STUDY="${V3_STUDY:-/scratch/shaohan/contour_QA/lung_l_nsrqa_month_temporal_family_validated_v1}"
-NOCORR_STUDY="${NOCORR_STUDY:-/scratch/shaohan/contour_QA/lung_l_nsrqa_corruption_ablation_month_temporal_v1}"
+ROI="${ROI:-Lung_L}"
+ROI_LC="${ROI,,}"
+STUDY_ROOT="${STUDY_ROOT:-/scratch/shaohan/contour_QA/${ROI_LC}_ct_contour_nsrqa_v1}"
+V3_STUDY="${V3_STUDY:-/scratch/shaohan/contour_QA/${ROI_LC}_nsrqa_month_temporal_family_validated_v1}"
+if [[ "${ROI}" == "Lung_L" ]]; then
+  NOCORR_STUDY="${NOCORR_STUDY:-/scratch/shaohan/contour_QA/lung_l_nsrqa_corruption_ablation_month_temporal_v1}"
+  WATCH="${WATCH-148,138,103,47,135}"   # Lung_L patients whose ranks are reported
+else
+  NOCORR_STUDY="${NOCORR_STUDY:-${V3_STUDY}}"
+  WATCH="${WATCH-}"
+fi
+WATCH_ARGS=()
+[[ -n "${WATCH}" ]] && WATCH_ARGS=(--watch "${WATCH}")
 SEED="${SEED:-91}"
 cd "${PROJECT_ROOT}"
 source "${PROJECT_ROOT}/scripts/dino_shape/activate_3dino_env.sh"
@@ -46,8 +56,7 @@ python -m analysis.score_nsrqa_floor_corrected \
   --arms "${ARMS[@]}" \
   --reference-arm contour_only_no_corruption \
   --seed "${SEED}" \
-  --roi Lung_L \
-  --watch 148,138,103,47,135 \
+  --roi "${ROI}" ${WATCH_ARGS[@]+"${WATCH_ARGS[@]}"} \
   --depth-thresholds 3,4.5,5.25,6,7.5 \
   --output-dir "${STUDY_ROOT}/evaluations_floor_corrected/seed${SEED}"
 
@@ -56,13 +65,12 @@ python -m analysis.calibrate_nsrqa_depth_threshold \
   --eval-root "${EV}" \
   --arms "${ARMS[@]}" \
   --seed "${SEED}" \
-  --roi Lung_L \
-  --watch 148,138,103,47,135 \
+  --roi "${ROI}" ${WATCH_ARGS[@]+"${WATCH_ARGS[@]}"} \
   --output-dir "${STUDY_ROOT}/evaluations_floor_corrected/seed${SEED}_depth_sweep"
 
 # 2x2 corruption x CT ablation for this seed (aggregate seeds with
 # analysis.ablation_corruption_ct_seeds once all seeds are done).
-python -m analysis.ablation_corruption_ct   --cell C0I0="${EV}/contour_only_no_corruption"   --cell C1I0="${EV}/contour_only_v3"   --cell C0I1="${EV}/ct_contour_no_corruption"   --cell C1I1="${EV}/ct_contour_corruption"   --extra C1I1_ct_absent="${EV}/ct_contour_corruption_ct_absent@C1I1"   --extra C0I1_ct_absent="${EV}/ct_contour_no_corruption_ct_absent@C0I1"   --extra ct_only="${EV}/ct_only_segmenter"   --combine rankavg_C1I1_ctonly=C1I1+ct_only   --seed "${SEED}" --roi Lung_L   --watch 148,138,103,47,135   --output-dir "${STUDY_ROOT}/evaluations_floor_corrected/seed${SEED}_ablation"
+python -m analysis.ablation_corruption_ct   --cell C0I0="${EV}/contour_only_no_corruption"   --cell C1I0="${EV}/contour_only_v3"   --cell C0I1="${EV}/ct_contour_no_corruption"   --cell C1I1="${EV}/ct_contour_corruption"   --extra C1I1_ct_absent="${EV}/ct_contour_corruption_ct_absent@C1I1"   --extra C0I1_ct_absent="${EV}/ct_contour_no_corruption_ct_absent@C0I1"   --extra ct_only="${EV}/ct_only_segmenter"   --combine rankavg_C1I1_ctonly=C1I1+ct_only   --seed "${SEED}" --roi "${ROI}" ${WATCH_ARGS[@]+"${WATCH_ARGS[@]}"}   --output-dir "${STUDY_ROOT}/evaluations_floor_corrected/seed${SEED}_ablation"
 python -m analysis.plot_ablation_corruption_ct   --ablation-dir "${STUDY_ROOT}/evaluations_floor_corrected/seed${SEED}_ablation"
 
 # Gate / CT-injection trajectory per CT arm, for quick inspection.

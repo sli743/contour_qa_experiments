@@ -98,7 +98,7 @@ def main() -> None:
     fig.legend(handles=handles, loc="upper center", ncol=2, frameon=False, bbox_to_anchor=(0.5, 1.02),
                labelcolor=INK)
     n = int(s.loc["C1I1", "n"])
-    fig.text(0.01, -0.02, f"Lung_L Month3 actual autoseg, n={n}, {seed_text}. Bars: 95% paired bootstrap over patients "
+    fig.text(0.01, -0.02, f"{meta.get('roi', 'Lung_L')} Month3 actual autoseg, n={n}, {seed_text}. Bars: 95% paired bootstrap over patients "
              f"(case sampling only, not training variance).", color=INK2, fontsize=8)
     fig.tight_layout(rect=(0, 0, 1, 0.93))
     for ext in ("png", "svg"):

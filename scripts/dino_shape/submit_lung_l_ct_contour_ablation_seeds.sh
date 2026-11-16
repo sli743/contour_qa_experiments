@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Extra training seeds for the Lung_L corruption x CT 2x2 ablation.
+# Training seeds for the corruption x CT 2x2 ablation (ROI=Lung_L or Lung_R).
 #
-# Per seed S (default SEEDS="92 93"), all five models are retrained:
+# Lung_L: extra seeds (default SEEDS="92 93"); seed 91 ran earlier.
+# Lung_R: all seeds (default SEEDS="91 92 93"). V3_STUDY must already be prepared
+#   (experiment_metadata.json + Month3 crops): scripts/dino_shape/submit_lung_r_ct_contour_stage1.sh.
+#
+# Per seed S, all five models are trained:
 #   contour-only study (V3_STUDY, family-validated corruption config):
 #     0 nsrqa_corruption   -> C1I0
 #     1 no_corruption      -> C0I0
@@ -14,7 +18,7 @@ set -euo pipefail
 #   + CT-absent re-evaluation of the two CT + contour arms.
 # Then per-seed scoring + ablation (jobs/lung_l_ct_contour_nsrqa_postprocess.job).
 #
-# Seed 91 is untouched: configs are prepared inline with --per-seed-files, so each
+# Existing seeds are untouched: configs are prepared inline with --per-seed-files, so each
 # seed gets its own experiment_manifest_seed<S>.csv and the Month3 inputs that
 # already exist are reused (no re-preprocessing).
 #
@@ -22,12 +26,15 @@ set -euo pipefail
 # (printed at the end).
 
 PROJECT_ROOT="${PROJECT_ROOT:-/home/shaohan/contour_qa_experiments}"
-STUDY_ROOT="${STUDY_ROOT:-/scratch/shaohan/contour_QA/lung_l_ct_contour_nsrqa_v1}"
-V3_STUDY="${V3_STUDY:-/scratch/shaohan/contour_QA/lung_l_nsrqa_month_temporal_family_validated_v1}"
-SEEDS="${SEEDS:-92 93}"
+ROI="${ROI:-Lung_L}"
+ROI_LC="${ROI,,}"
+JOB_TAG="${JOB_TAG:-lung${ROI:5:1}}"   # lungL / lungR
+STUDY_ROOT="${STUDY_ROOT:-/scratch/shaohan/contour_QA/${ROI_LC}_ct_contour_nsrqa_v1}"
+V3_STUDY="${V3_STUDY:-/scratch/shaohan/contour_QA/${ROI_LC}_nsrqa_month_temporal_family_validated_v1}"
+# Lung_L seed 91 was run before this script existed; a new ROI runs all seeds here.
+if [[ "${ROI}" == "Lung_L" ]]; then SEEDS="${SEEDS:-92 93}"; else SEEDS="${SEEDS:-91 92 93}"; fi
 # Optional cap on concurrent GPU tasks per array, e.g. ARRAY_LIMIT=2.
 ARRAY_LIMIT="${ARRAY_LIMIT:-}"
-ROI=Lung_L
 
 cd "${PROJECT_ROOT}"
 source "${PROJECT_ROOT}/scripts/dino_shape/activate_3dino_env.sh"
@@ -57,8 +64,8 @@ SUMMARY=()
 for SEED in ${SEEDS}; do
   echo
   echo "=== seed ${SEED} ==="
-  for d in "${V3_STUDY}/models/nsrqa_corruption/lung_l_nsrqa_corruption_seed${SEED}" \
-           "${STUDY_ROOT}/models/ct_contour_corruption/lung_l_ct_contour_corruption_seed${SEED}"; do
+  for d in "${V3_STUDY}/models/nsrqa_corruption/${ROI_LC}_nsrqa_corruption_seed${SEED}" \
+           "${STUDY_ROOT}/models/ct_contour_corruption/${ROI_LC}_ct_contour_corruption_seed${SEED}"; do
     [[ -e "${d}" ]] && { echo "Seed ${SEED} already has models (${d}); remove them or pick another seed." >&2; exit 2; }
   done
 
@@ -74,36 +81,36 @@ for SEED in ${SEEDS}; do
     --source-config "${V3_STUDY}/configs/nsrqa_corruption_seed${SEED}.yaml" \
     --source-actual-autoseg "${V3_STUDY}/actual_autoseg_preprocessed" \
     --study-root "${STUDY_ROOT}" \
-    --seed "${SEED}" --per-seed-files
+    --seed "${SEED}" --roi "${ROI}" --per-seed-files
 
   V3_EXPORTS="ALL,PROJECT_ROOT=${PROJECT_ROOT},STUDY_ROOT=${V3_STUDY},ROI=${ROI},MANIFEST=${V3_STUDY}/experiment_manifest_seed${SEED}.csv"
   CT_EXPORTS="ALL,PROJECT_ROOT=${PROJECT_ROOT},STUDY_ROOT=${STUDY_ROOT},ROI=${ROI},MANIFEST=${STUDY_ROOT}/experiment_manifest_seed${SEED}.csv"
   V3_LOGS=(--output="${V3_STUDY}/logs/slurm-%x-%A_%a.out" --error="${V3_STUDY}/logs/slurm-%x-%A_%a.err")
   CT_LOGS=(--output="${STUDY_ROOT}/logs/slurm-%x-%A_%a.out" --error="${STUDY_ROOT}/logs/slurm-%x-%A_%a.err")
 
-  C_TRAIN="$(jobid "$(sbatch --parsable -p hugo --account=geoffrey_hugo --job-name="lungL_s${SEED}_c_train" \
+  C_TRAIN="$(jobid "$(sbatch --parsable -p hugo --account=geoffrey_hugo --job-name="${JOB_TAG}_s${SEED}_c_train" \
     --export="${V3_EXPORTS}" "${V3_LOGS[@]}" --array="$(arr 0-1)" \
     jobs/lung_l_nsrqa_month_temporal_ablation_train.job)")"
-  C_EVAL="$(jobid "$(sbatch --parsable -p hugo --account=geoffrey_hugo --job-name="lungL_s${SEED}_c_eval" \
+  C_EVAL="$(jobid "$(sbatch --parsable -p hugo --account=geoffrey_hugo --job-name="${JOB_TAG}_s${SEED}_c_eval" \
     --dependency="aftercorr:${C_TRAIN}" \
     --export="${V3_EXPORTS}" "${V3_LOGS[@]}" --array="$(arr 0-1)" \
     jobs/lung_l_nsrqa_month_temporal_ablation_eval.job)")"
 
-  T_TRAIN="$(jobid "$(sbatch --parsable -p hugo --account=geoffrey_hugo --job-name="lungL_s${SEED}_ctc_train" \
+  T_TRAIN="$(jobid "$(sbatch --parsable -p hugo --account=geoffrey_hugo --job-name="${JOB_TAG}_s${SEED}_ctc_train" \
     --export="${CT_EXPORTS}" "${CT_LOGS[@]}" --array="$(arr 0-2)" \
     jobs/lung_l_nsrqa_month_temporal_ablation_train.job)")"
-  T_EVAL="$(jobid "$(sbatch --parsable -p hugo --account=geoffrey_hugo --job-name="lungL_s${SEED}_ctc_eval" \
+  T_EVAL="$(jobid "$(sbatch --parsable -p hugo --account=geoffrey_hugo --job-name="${JOB_TAG}_s${SEED}_ctc_eval" \
     --dependency="aftercorr:${T_TRAIN}" \
     --export="${CT_EXPORTS},IMAGE_MODE=present" "${CT_LOGS[@]}" --array="$(arr 0-2)" \
     jobs/lung_l_nsrqa_month_temporal_ablation_eval.job)")"
-  T_ABS="$(jobid "$(sbatch --parsable -p hugo --account=geoffrey_hugo --job-name="lungL_s${SEED}_ctc_ctabsent" \
+  T_ABS="$(jobid "$(sbatch --parsable -p hugo --account=geoffrey_hugo --job-name="${JOB_TAG}_s${SEED}_ctc_ctabsent" \
     --dependency="aftercorr:${T_TRAIN}" \
     --export="${CT_EXPORTS},IMAGE_MODE=absent" "${CT_LOGS[@]}" --array="$(arr 0-1)" \
     jobs/lung_l_nsrqa_month_temporal_ablation_eval.job)")"
 
-  POST="$(jobid "$(sbatch --parsable -p hugo --account=geoffrey_hugo --job-name="lungL_s${SEED}_post" \
+  POST="$(jobid "$(sbatch --parsable -p hugo --account=geoffrey_hugo --job-name="${JOB_TAG}_s${SEED}_post" \
     --dependency="afterok:${C_EVAL}:${T_EVAL}:${T_ABS}" \
-    --export="ALL,PROJECT_ROOT=${PROJECT_ROOT},STUDY_ROOT=${STUDY_ROOT},V3_STUDY=${V3_STUDY},NOCORR_STUDY=${V3_STUDY},SEED=${SEED}" \
+    --export="ALL,PROJECT_ROOT=${PROJECT_ROOT},STUDY_ROOT=${STUDY_ROOT},V3_STUDY=${V3_STUDY},NOCORR_STUDY=${V3_STUDY},SEED=${SEED},ROI=${ROI}" \
     --output="${STUDY_ROOT}/logs/slurm-%x-%j.out" --error="${STUDY_ROOT}/logs/slurm-%x-%j.err" \
     jobs/lung_l_ct_contour_nsrqa_postprocess.job)")"
 
@@ -113,8 +120,9 @@ done
 echo
 echo "Submitted:"
 printf '  %s\n' "${SUMMARY[@]}"
-DIRS="--ablation-dir seed91=${STUDY_ROOT}/evaluations_floor_corrected/seed91_ablation"
-for SEED in ${SEEDS}; do
+ALL_SEEDS="$(printf '%s\n' 91 ${SEEDS} | sort -un | tr '\n' ' ')"
+DIRS=""
+for SEED in ${ALL_SEEDS}; do
   DIRS+=" --ablation-dir seed${SEED}=${STUDY_ROOT}/evaluations_floor_corrected/seed${SEED}_ablation"
 done
 cat <<EOF2

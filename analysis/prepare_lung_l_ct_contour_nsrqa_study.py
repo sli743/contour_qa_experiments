@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare the CT + contour NSR-QA study (Lung_L, Month1+2 -> Month3).
+"""Prepare the CT + contour NSR-QA study (Lung_L or Lung_R, Month1+2 -> Month3).
 
 Every arm copies the v3 family-validated contour-only config (same split,
 corruption families/severities, loss, optimizer, seed) and changes only what
@@ -60,9 +60,9 @@ def count_nii(path: str) -> int:
     return len(list(p.rglob("*.nii.gz"))) if p.is_dir() else -1
 
 
-def arm_config(source: dict, arm: str, study_root: Path, seed: int) -> dict:
+def arm_config(source: dict, arm: str, study_root: Path, seed: int, roi: str = "Lung_L") -> dict:
     cfg = copy.deepcopy(source)
-    name = f"lung_l_{arm}_seed{seed}"
+    name = f"{roi.lower()}_{arm}_seed{seed}"
     cfg["experiment_name"] = name
     cfg["output_root"] = str(study_root / "models" / arm)
     cfg["seed"] = int(seed)
@@ -82,7 +82,8 @@ def arm_config(source: dict, arm: str, study_root: Path, seed: int) -> dict:
 
     meta = dict(cfg.get("study_metadata") or {})
     meta.update({
-        "experiment": "Lung_L CT + contour NSR-QA, Month3 temporal holdout",
+        "experiment": f"{roi} CT + contour NSR-QA, Month3 temporal holdout",
+        "roi": roi,
         "arm": arm,
         "seed": int(seed),
         "image_conditioning_change": (
@@ -108,6 +109,8 @@ def main() -> None:
                     help="<v3 study>/actual_autoseg_preprocessed (Month3 crops with ct.nii.gz)")
     ap.add_argument("--study-root", required=True)
     ap.add_argument("--seed", type=int, default=91)
+    ap.add_argument("--roi", default=None,
+                    help="ROI name used in experiment names; default: the source config's data.roi_name, else Lung_L")
     ap.add_argument("--arms", nargs="+", default=list(ARMS), choices=ARMS)
     ap.add_argument("--epochs", type=int, default=None,
                     help="Override training.num_epochs (smoke runs only).")
@@ -117,6 +120,10 @@ def main() -> None:
     args = ap.parse_args()
 
     source = yaml.safe_load(Path(args.source_config).read_text(encoding="utf-8"))
+    src_roi = (source.get("data") or {}).get("roi_name")
+    roi = args.roi or src_roi or "Lung_L"
+    if src_roi and src_roi != roi:
+        raise SystemExit(f"--roi {roi} does not match the source config's data.roi_name={src_roi}")
     study = Path(args.study_root)
     (study / "configs").mkdir(parents=True, exist_ok=True)
     (study / "logs").mkdir(parents=True, exist_ok=True)
@@ -143,7 +150,7 @@ def main() -> None:
 
     rows = []
     for idx, arm in enumerate(args.arms):
-        cfg = arm_config(source, arm, study, args.seed)
+        cfg = arm_config(source, arm, study, args.seed, roi)
         if args.epochs is not None:
             cfg["training"]["num_epochs"] = int(args.epochs)
             cfg["study_metadata"]["smoke_run_epochs"] = int(args.epochs)
@@ -171,6 +178,7 @@ def main() -> None:
         "source_config": str(Path(args.source_config).resolve()),
         "source_actual_autoseg": str(src),
         "seed": args.seed,
+        "roi": roi,
         "arms": list(args.arms),
         "ct_crop_audit": audit,
         "image_conditioning_defaults": IMAGE_CONDITIONING,
