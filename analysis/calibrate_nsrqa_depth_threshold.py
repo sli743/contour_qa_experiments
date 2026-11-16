@@ -41,10 +41,41 @@ def load(path: Path) -> np.ndarray:
     return sitk.GetArrayFromImage(sitk.ReadImage(str(path))) > 0
 
 
-def change_depths(inp: np.ndarray, rec: np.ndarray, spacing_zyx, vml: float, min_component_ml: float) -> np.ndarray:
-    """Depth (mm) of every kept change voxel; same definition as score_nsrqa_floor_corrected."""
+def scan_fov_mask(ct_path: Path, margin_mm: float = 4.5) -> np.ndarray | None:
+    """Voxels inside the scanned field of view, shrunk by margin_mm along z.
+
+    Crops that reach past the scan's superior/inferior end are padded with whole
+    constant slices (-1024 HU, which reads as air). The CT-conditioned models can
+    grow lung into that padding or carve the flat face where the scan cuts the lung,
+    neither of which says anything about the contour. Change there is excluded from
+    the QA score. Returns None if the CT is missing or has no padded slices.
+    """
+    ct_path = Path(ct_path)
+    if margin_mm < 0 or not ct_path.exists():
+        return None
+    img = sitk.ReadImage(str(ct_path))
+    ct = sitk.GetArrayFromImage(img)
+    flat = ct.reshape(ct.shape[0], -1)
+    padded = flat.max(axis=1) == flat.min(axis=1)
+    if not padded.any():
+        return None
+    sz = img.GetSpacing()[2]
+    grow = int(np.ceil(margin_mm / sz - 1e-6))
+    if grow:
+        padded = ndimage.binary_dilation(padded, iterations=grow)
+    return np.broadcast_to(~padded[:, None, None], ct.shape).copy()
+
+
+def change_depths(inp: np.ndarray, rec: np.ndarray, spacing_zyx, vml: float, min_component_ml: float,
+                  valid: np.ndarray | None = None) -> np.ndarray:
+    """Depth (mm) of every kept change voxel; same definition as score_nsrqa_floor_corrected.
+
+    valid: optional mask (e.g. scan_fov_mask); change outside it is ignored.
+    """
     parts = []
     for change, other in ((inp & ~rec, rec), (rec & ~inp, inp)):
+        if valid is not None:
+            change = change & valid
         if not change.any():
             continue
         dist = ndimage.distance_transform_edt(~other, sampling=spacing_zyx)
@@ -90,6 +121,9 @@ def main() -> None:
     ap.add_argument("--split", default="testing1")
     ap.add_argument("--thresholds", default="1.5,2.25,3,3.75,4.5,5.25,6,7.5,9,12")
     ap.add_argument("--min-component-ml", type=float, nargs="+", default=[0.05])
+    ap.add_argument("--fov-margin-mm", type=float, default=4.5,
+                    help="ignore change in CT slices outside the scan (constant padding) and within this many mm "
+                         "of them; negative disables")
     ap.add_argument("--floor-ml", type=float, default=0.5,
                     help="label-free rule: clean deep volume allowed at the chosen percentile")
     ap.add_argument("--floor-percentiles", default="90,95")
@@ -131,7 +165,7 @@ def main() -> None:
                 vmls[pid] = vml
                 inp = sitk.GetArrayFromImage(img) > 0
                 rec = load(d / "nsrqa_reconstruction.nii.gz")
-                act_d[pid] = change_depths(inp, rec, sp, vml, mc)
+                act_d[pid] = change_depths(inp, rec, sp, vml, mc, scan_fov_mask(d / "ct.nii.gz", args.fov_margin_mm))
                 if pid not in truth_cache:
                     app = load(d / "approved.nii.gz")
                     m = json.loads((d / "metrics.json").read_text())
@@ -142,7 +176,7 @@ def main() -> None:
                     c = clean[pid]
                     cin = load(c / "approved.nii.gz")  # clean eval: approved contour is the input
                     crec = load(c / "nsrqa_reconstruction.nii.gz")
-                    cln_d[pid] = change_depths(cin, crec, sp, vml, mc)
+                    cln_d[pid] = change_depths(cin, crec, sp, vml, mc, scan_fov_mask(c / "ct.nii.gz", args.fov_margin_mm))
             print(f"[{arm}] min_component_ml={mc}: {len(act_d)} cases, {len(cln_d)} clean", flush=True)
 
             truth = {k: np.array([truth_cache[p][k] for p in pids]) for k in ("true_thick1_ml", "true_error_ml", "true_hd95_mm")}

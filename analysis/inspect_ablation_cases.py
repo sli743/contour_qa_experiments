@@ -49,6 +49,8 @@ from matplotlib.lines import Line2D  # noqa: E402
 from matplotlib.patches import Patch  # noqa: E402
 from scipy import ndimage  # noqa: E402
 
+from analysis.calibrate_nsrqa_depth_threshold import scan_fov_mask  # noqa: E402
+
 CELLS = ("C0I0", "C1I0", "C0I1", "C1I1")
 TITLES = {
     "C0I0": "contour only · no corruption",
@@ -66,9 +68,11 @@ def load(p: Path) -> np.ndarray:
     return sitk.GetArrayFromImage(sitk.ReadImage(str(p))) > 0
 
 
-def deep_change_mask(inp, rec, spacing, vml, depth, min_ml) -> np.ndarray:
+def deep_change_mask(inp, rec, spacing, vml, depth, min_ml, valid=None) -> np.ndarray:
     out = np.zeros_like(inp)
     for change, other in ((inp & ~rec, rec), (rec & ~inp, inp)):
+        if valid is not None:
+            change = change & valid
         if not change.any():
             continue
         lab, n = ndimage.label(change, STRUCT)
@@ -123,10 +127,11 @@ def case_data(pid: str, arm_dirs: dict, args, clean: bool = False) -> dict:
     inp = app.copy() if clean else sitk.GetArrayFromImage(img) > 0
     err = inp ^ app
     e1 = error1(inp, app)
-    out = {"ct": ct, "app": app, "inp": inp, "err": err, "e1": e1, "vml": vml, "cells": {}}
+    valid = scan_fov_mask(d1 / "ct.nii.gz", args.fov_margin_mm)
+    out = {"ct": ct, "app": app, "inp": inp, "err": err, "e1": e1, "vml": vml, "cells": {}, "valid": valid}
     for c in CELLS:
         rec = load(case_dir(arm_dirs[c], kind, pid, args) / "nsrqa_reconstruction.nii.gz")
-        deep = deep_change_mask(inp, rec, sp, vml, args.depth, args.min_component_ml)
+        deep = deep_change_mask(inp, rec, sp, vml, args.depth, args.min_component_ml, valid)
         chg = inp ^ rec
         out["cells"][c] = {"rec": rec, "deep": deep, "on": deep & err, "off": deep & ~err,
                            "deep_ml": deep.sum() * vml, "deep_on_error_ml": (deep & err).sum() * vml,
@@ -237,10 +242,15 @@ def main() -> None:
     ap.add_argument("--split", default="testing1")
     ap.add_argument("--depth", type=float, default=4.5)
     ap.add_argument("--min-component-ml", type=float, default=0.05)
+    ap.add_argument("--fov-margin-mm", type=float, default=4.5,
+                    help="ignore change in CT slices outside the scan (constant padding) and within this many mm "
+                         "of them; negative disables")
     ap.add_argument("--miss-rank", type=int, default=15)
     ap.add_argument("--fp-rank", type=int, default=10)
     ap.add_argument("--crop-mm", type=float, default=150)
     ap.add_argument("--skip-all-cases", action="store_true", help="only compute metrics for selected patients")
+    ap.add_argument("--pages-only", action="store_true", help="skip the per-case metrics pass; only render pages")
+    ap.add_argument("--groups", default="", help="comma-separated group prefixes to render (default: all)")
     args = ap.parse_args()
 
     abl = Path(args.ablation_dir)
@@ -258,6 +268,9 @@ def main() -> None:
         print(f"{g}: {', '.join(ps) if ps else '(none)'}")
 
     # per-case overlap metrics (all patients, actual autoseg)
+    if args.pages_only:
+        render_pages(groups, arm_dirs, ranks, tr, pc, out, args)
+        return
     pids = sorted(tr.index, key=lambda s: (len(s), s)) if not args.skip_all_cases else sorted(set(sel.patient_id))
     rows = []
     for pid in pids:
@@ -293,9 +306,13 @@ def main() -> None:
     with pd.option_context("display.width", 200, "display.max_columns", 20):
         print(summ.round(3).to_string(index=False))
 
-    # pages
+    render_pages(groups, arm_dirs, ranks, tr, pc, out, args)
+
+
+def render_pages(groups, arm_dirs, ranks, tr, pc, out, args) -> None:
+    only = [x.strip() for x in args.groups.split(",") if x.strip()]
     for g, ps in groups.items():
-        if not ps:
+        if not ps or (only and not any(g.startswith(o) for o in only)):
             continue
         with PdfPages(out / f"{g}.pdf") as pdf:
             for pid in ps:

@@ -47,3 +47,9 @@ bash scripts/dino_shape/submit_lung_l_ct_contour_nsrqa.sh
 ## Outputs
 
 Scores land in `<study>/evaluations_floor_corrected/seed91/<arm>_floor_corrected_scores.csv`, the same layout used by `analysis/plots/plot_arm_ranking_comparison.py` and `plot_ood_vs_qa_scores.py`.
+
+## Scoring notes
+
+- **Depth threshold.** The CT arms follow input detail closely, so the deep-change threshold is calibrated per arm (`analysis/calibrate_nsrqa_depth_threshold.py`; label-free rule: smallest depth whose clean-approved p90 deep volume is <= 0.5 mL). Seed 91: 5.25 mm for CT + contour, 7.5 mm for contour only. The postprocess job scores 3/4.5/5.25/6/7.5 mm.
+- **Out-of-scan padding.** Some crops reach past the scan's superior/inferior end and are padded with constant -1024 HU slices, which look like air. The CT + corruption model grows lung into that padding or carves the flat face where the scan cuts the lung (Lung_L 76, 95). All deep-change scores now ignore change in padded slices and within `--fov-margin-mm` (default 4.5 mm) of them; `-1` disables. Applies to every arm, contour only included. 4/56 Month3 cases are affected.
+- **Ablation.** `analysis/ablation_corruption_ct.py` (2x2 corruption x CT, paired bootstrap), `analysis/plot_ablation_corruption_ct.py`, `analysis/inspect_ablation_cases.py` (rule-picked patients, deep change on/off the true error).

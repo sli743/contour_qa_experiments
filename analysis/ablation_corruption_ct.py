@@ -43,7 +43,7 @@ import pandas as pd
 import SimpleITK as sitk
 from scipy import ndimage, stats
 
-from analysis.calibrate_nsrqa_depth_threshold import change_depths, thick1_ml
+from analysis.calibrate_nsrqa_depth_threshold import change_depths, scan_fov_mask, thick1_ml
 
 CELLS = ("C0I0", "C1I0", "C0I1", "C1I1")
 LABELS = {
@@ -99,13 +99,13 @@ def per_case_rows(arm: str, arm_dir: Path, args, grid) -> list[dict]:
             "error_recall": good.sum() / n_err if n_err else np.nan,
             "error_reduction": (n_err - int((rec ^ app).sum())) / n_err if n_err else np.nan,
         }
-        dep = change_depths(inp, rec, sp, vml, args.min_component_ml)
+        dep = change_depths(inp, rec, sp, vml, args.min_component_ml, scan_fov_mask(d / "ct.nii.gz", args.fov_margin_mm))
         for t in grid:
             row[f"deep{t:g}_ml"] = float((dep >= t - 1e-6).sum() * vml)
         if pid in clean:
             c = clean[pid]
             cdep = change_depths(load(c / "approved.nii.gz"), load(c / "nsrqa_reconstruction.nii.gz"), sp, vml,
-                                 args.min_component_ml)
+                                 args.min_component_ml, scan_fov_mask(c / "ct.nii.gz", args.fov_margin_mm))
             for t in grid:
                 row[f"clean_deep{t:g}_ml"] = float((cdep >= t - 1e-6).sum() * vml)
         rows.append(row)
@@ -176,6 +176,9 @@ def main() -> None:
     ap.add_argument("--floor-ml", type=float, default=0.5)
     ap.add_argument("--floor-percentile", type=float, default=90)
     ap.add_argument("--min-component-ml", type=float, default=0.05)
+    ap.add_argument("--fov-margin-mm", type=float, default=4.5,
+                    help="ignore change in CT slices outside the scan (constant padding) and within this many mm "
+                         "of them; negative disables")
     ap.add_argument("--top-k", type=int, default=10)
     ap.add_argument("--bootstrap", type=int, default=2000)
     ap.add_argument("--watch", default="")
@@ -301,6 +304,7 @@ def main() -> None:
         "n_patients": n, "top_k": args.top_k, "bootstrap": args.bootstrap, "seed": args.seed,
         "floor_rule": f"clean p{args.floor_percentile:g} deep volume <= {args.floor_ml} mL",
         "common_threshold_mm": args.common_threshold, "relevance": "top-k true_thick1_ml",
+        "fov_margin_mm": args.fov_margin_mm,
     }, indent=2))
 
     with pd.option_context("display.width", 250, "display.max_columns", 40):

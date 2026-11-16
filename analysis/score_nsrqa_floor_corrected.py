@@ -28,6 +28,8 @@ import numpy as np
 import SimpleITK as sitk
 from scipy import ndimage, stats
 
+from analysis.calibrate_nsrqa_depth_threshold import scan_fov_mask
+
 STRUCT = ndimage.generate_binary_structure(3, 3)  # 26-connected, 1 voxel
 
 
@@ -70,7 +72,7 @@ def disagreement_scores(inp: np.ndarray, ref: np.ndarray, vml: float, prefix: st
 
 def change_depth_scores(inp: np.ndarray, rec: np.ndarray, spacing_zyx: tuple, vml: float,
                         min_component_ml: float, prefix: str = "qa",
-                        thresholds: tuple = (3.0, 4.5, 6.0)) -> dict:
+                        thresholds: tuple = (3.0, 4.5, 6.0), valid: np.ndarray | None = None) -> dict:
     """HD-style scores on the network's change, robust to the thin reconstruction shell.
 
     Each removed voxel (inp & ~rec) gets its distance to the reconstruction and each
@@ -82,6 +84,8 @@ def change_depth_scores(inp: np.ndarray, rec: np.ndarray, spacing_zyx: tuple, vm
     out = {}
     depth_parts, comp_max = [], []
     for name, change, other in (("removed", inp & ~rec, rec), ("added", rec & ~inp, inp)):
+        if valid is not None:
+            change = change & valid  # drop change in padded out-of-scan slices
         dist = ndimage.distance_transform_edt(~other, sampling=spacing_zyx)
         lab, n = ndimage.label(change, STRUCT)
         keep = np.zeros(n + 1, dtype=bool)
@@ -164,6 +168,9 @@ def main() -> None:
                     help="comma-separated patient ids of notable shape cases; adds precision@k against them")
     ap.add_argument("--min-component-ml", type=float, default=0.05,
                     help="drop change components smaller than this before depth scores")
+    ap.add_argument("--fov-margin-mm", type=float, default=4.5,
+                    help="ignore change in CT slices outside the scan (constant padding) and within this many mm "
+                         "of them; negative disables")
     ap.add_argument("--depth-thresholds", default="3,4.5,6",
                     help="comma-separated mm thresholds for qa_change_deep<t>_ml; calibrate per arm with "
                          "analysis.calibrate_nsrqa_depth_threshold")
@@ -209,7 +216,8 @@ def main() -> None:
             row.update({k: true_err[k] for k in ("true_thick1_ml", "true_thick1_maxcc_ml")})
             row.update(disagreement_scores(inp, rec, vml, "qa"))
             row.update(change_depth_scores(inp, rec, spacing_zyx, vml, args.min_component_ml,
-                                           thresholds=depth_thresholds))
+                                           thresholds=depth_thresholds,
+                                           valid=scan_fov_mask(d / "ct.nii.gz", args.fov_margin_mm)))
             if arm != args.reference_arm and pid in ref_cases:
                 ref_rec = load(ref_cases[pid] / "nsrqa_reconstruction.nii.gz")
                 row["xarm_1_minus_dice"] = one_minus_dice(rec, ref_rec)
