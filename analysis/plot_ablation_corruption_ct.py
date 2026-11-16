@@ -8,6 +8,7 @@ Each panel: x = training corruption (no / yes), one line per CT input (no / yes)
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import matplotlib
@@ -21,7 +22,7 @@ SERIES = {"I0": ("Contour only", "#2a78d6", "o"), "I1": ("CT + contour", "#eb683
 
 PANELS = [
     ("rho_deep_common_ml", "Deep change ≥ 4.5 mm", "Spearman ρ vs true error", True),
-    ("rho_deep_cal_ml", "Deep change, calibrated depth", "Spearman ρ vs true error", True),
+    ("ap_deep_common_ml", "Top-10 AP, deep change ≥ 4.5 mm", "average precision, top-10 true error", True),
     ("rho_qa_hd95_mm", "QA HD95", "Spearman ρ vs true error", True),
     ("mean_change_precision", "Change precision", "share of change toward approved", True),
     ("clean_p90_deep_common_ml", "False alarm, approved input", "deep change at 4.5 mm, p90 (mL)", False),
@@ -35,6 +36,15 @@ def main() -> None:
     args = ap.parse_args()
     d = Path(args.ablation_dir)
     s = pd.read_csv(d / "ablation_arm_summary.csv").set_index("arm")
+    meta_path = d / "ablation_metadata.json"
+    meta = json.loads(meta_path.read_text().replace("NaN", "null")) if meta_path.exists() else {}
+    per_seed_path = d / "ablation_per_seed.csv"
+    per_seed = pd.read_csv(per_seed_path) if per_seed_path.exists() else None
+    if "seeds" in meta:
+        seed_ids = [str(k).removeprefix("seed") for k in meta["seeds"]]
+        seed_text = f"mean of seeds {', '.join(seed_ids)} (small hollow markers = single seeds)"
+    else:
+        seed_text = f"seed {meta.get('seed', '?')}"
 
     plt.rcParams.update({"font.family": "DejaVu Sans", "font.size": 10, "axes.edgecolor": INK2,
                          "axes.labelcolor": INK2, "xtick.color": INK2, "ytick.color": INK2})
@@ -52,6 +62,11 @@ def main() -> None:
             xs = [0 - 0.04, 1 - 0.04] if i_key == "I0" else [0 + 0.04, 1 + 0.04]
             ax.errorbar(xs, y, yerr=[lo, hi], color=col, marker=mk, markersize=8, linewidth=2,
                         elinewidth=1.2, capsize=0, markeredgecolor=SURFACE, markeredgewidth=1.5, zorder=3)
+            if per_seed is not None and key in per_seed:
+                for x, c in zip(xs, cells):
+                    vals = per_seed.loc[per_seed.arm == c, key].dropna()
+                    ax.scatter([x] * len(vals), vals, s=16, marker=mk,
+                               facecolors="none", edgecolors=col, linewidths=1, alpha=0.8, zorder=2)
             labels[0].append((xs[0], y[0]))
             labels[1].append((xs[1], y[1]))
         lo_y, hi_y = ax.get_ylim()
@@ -83,7 +98,7 @@ def main() -> None:
     fig.legend(handles=handles, loc="upper center", ncol=2, frameon=False, bbox_to_anchor=(0.5, 1.02),
                labelcolor=INK)
     n = int(s.loc["C1I1", "n"])
-    fig.text(0.01, -0.02, f"Lung_L Month3 actual autoseg, n={n}, seed 91. Bars: 95% paired bootstrap over patients "
+    fig.text(0.01, -0.02, f"Lung_L Month3 actual autoseg, n={n}, {seed_text}. Bars: 95% paired bootstrap over patients "
              f"(case sampling only, not training variance).", color=INK2, fontsize=8)
     fig.tight_layout(rect=(0, 0, 1, 0.93))
     for ext in ("png", "svg"):
