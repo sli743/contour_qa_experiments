@@ -130,6 +130,37 @@ def ap_at(score: np.ndarray, rel: np.ndarray) -> float:
     return float((hits[r] / (np.nonzero(r)[0] + 1)).mean())
 
 
+def rank_average(dfs: list[pd.DataFrame]) -> pd.DataFrame:
+    """Combined QA score: mean of each arm's within-sample rank, per score.
+
+    The frames must be row-aligned (same patients, same order, same resample).
+    Ranks are recomputed on whatever rows are passed, so a bootstrap resample is
+    re-ranked rather than reusing full-sample ranks. Network-behaviour columns are
+    not defined for a combination and are left out.
+    """
+    base = dfs[0].reset_index(drop=True)
+    out = base[["patient_id", "true_thick1_ml"]].copy()
+    for s in SCORES:
+        # higher score -> higher rank; a missing score ranks as the least suspicious
+        out[s] = np.mean([pd.Series(d[s].to_numpy()).rank(method="average", na_option="top").to_numpy()
+                          for d in dfs], axis=0)
+    return out
+
+
+def parse_combos(specs: list[str], known) -> dict[str, list[str]]:
+    combos = {}
+    for spec in specs:
+        name, _, rest = spec.partition("=")
+        parts = [p for p in rest.split("+") if p]
+        if not name or len(parts) < 2:
+            raise SystemExit(f"--combine needs NAME=ARM+ARM, got {spec}")
+        bad = [p for p in parts if p not in known]
+        if bad:
+            raise SystemExit(f"--combine {name}: unknown arm(s) {bad}")
+        combos[name] = parts
+    return combos
+
+
 def arm_metrics(df: pd.DataFrame, rel: np.ndarray, k: int) -> dict:
     """Metrics for one arm on (possibly resampled) rows; rel = fixed per-patient relevance."""
     y = df["true_thick1_ml"].to_numpy()
@@ -138,10 +169,13 @@ def arm_metrics(df: pd.DataFrame, rel: np.ndarray, k: int) -> dict:
         v = df[s].to_numpy()
         out[f"rho_{s}"] = float(stats.spearmanr(v, y)[0]) if np.std(v) > 0 else np.nan
         out[f"ap_{s}"] = ap_at(v, rel)
+        out[f"p@{k}_{s}"] = float(rel[np.argsort(-v, kind="stable")[:k]].mean())
     for b in BEHAVIOUR:
-        out[f"mean_{b}"] = float(np.nanmean(df[b]))
-    out["median_change_ml"] = float(df["change_ml"].median())
-    out["median_harmful_change_ml"] = float(df["harmful_change_ml"].median())
+        if b in df and df[b].notna().any():
+            out[f"mean_{b}"] = float(np.nanmean(df[b]))
+    if "change_ml" in df:
+        out["median_change_ml"] = float(df["change_ml"].median())
+        out["median_harmful_change_ml"] = float(df["harmful_change_ml"].median())
     if "clean_deep_common_ml" in df and df["clean_deep_common_ml"].notna().all():
         out["clean_p90_deep_common_ml"] = float(np.percentile(df["clean_deep_common_ml"], 90))
         out["clean_mean_deep_common_ml"] = float(df["clean_deep_common_ml"].mean())
@@ -167,6 +201,9 @@ def main() -> None:
     ap.add_argument("--extra", action="append", default=[],
                     help="label=<evaluations>/<arm>[@CELL] - reference arm; @CELL borrows that cell's calibrated "
                          "threshold when the arm has no clean-approved cases")
+    ap.add_argument("--combine", action="append", default=[],
+                    help="NAME=ARM+ARM[+ARM] - rank-average combined score of these arms (cells or extras), "
+                         "re-ranked inside every bootstrap resample; compared against each of its parts")
     ap.add_argument("--seed", default="91")
     ap.add_argument("--mode", default="autoseg_centered")
     ap.add_argument("--roi", default="Lung_L")
@@ -205,6 +242,7 @@ def main() -> None:
         name, _, rest = spec.partition("=")
         path, _, parent = rest.partition("@")
         arms[name] = (Path(path), parent or None)
+    combos = parse_combos(args.combine, arms)
 
     cache = out / "per_case.csv"
     if args.reuse_cache and cache.exists():
@@ -238,15 +276,18 @@ def main() -> None:
     rel[np.argsort(-truth, kind="stable")[: args.top_k]] = True
     watch = [w.strip() for w in args.watch.split(",") if w.strip() and w.strip() in pids]
 
-    # point estimates per arm
-    point = {a: arm_metrics(df, rel, args.top_k) for a, df in by_arm.items()}
+    # point estimates per arm (combinations are re-ranked from their parts)
+    view = dict(by_arm)
+    for name, parts in combos.items():
+        view[name] = rank_average([by_arm[p] for p in parts])
+    point = {a: arm_metrics(df, rel, args.top_k) for a, df in view.items()}
     summary = []
-    for a, df in by_arm.items():
-        e = {"arm": a, "label": LABELS.get(a, a), "n": len(df),
-             "calibrated_threshold_mm": thr[a], "common_threshold_mm": args.common_threshold, **point[a]}
+    for a, df in view.items():
+        label = LABELS.get(a, a) if a not in combos else "rank average of " + " + ".join(combos[a])
+        e = {"arm": a, "label": label, "n": len(df),
+             "calibrated_threshold_mm": thr.get(a, np.nan), "common_threshold_mm": args.common_threshold, **point[a]}
         for s in SCORES:
             v = df[s].to_numpy()
-            e[f"p@{args.top_k}_{s}"] = float(rel[np.argsort(-v, kind="stable")[: args.top_k]].mean())
             rk = stats.rankdata(-v, method="ordinal")
             for w in watch:
                 e[f"rank_{w}_{s}"] = int(rk[pids.index(w)])
@@ -257,14 +298,18 @@ def main() -> None:
     rng = np.random.default_rng(0)
     keys = [k for k in point["C1I1"] if all(k in point[c] for c in CELLS)]
     n = len(pids)
-    boot_arm = {a: {k: [] for k in point[a]} for a in arms}
+    boot_arm = {a: {k: [] for k in point[a]} for a in view}
     boot_eff = {k: [] for k in keys}
     extra_cmp = [(x, p) for x, (_, p) in arms.items() if p in CELLS]
     boot_extra = {(x, k): [] for x, _ in extra_cmp for k in keys if k in point[x]}
+    # combination vs each part, on the ranking metrics both have
+    combo_cmp = {(c, p, k): [] for c, parts in combos.items() for p in parts for k in point[c] if k in point[p]}
     for _ in range(args.bootstrap):
         idx = rng.integers(0, n, n)
         m = {a: arm_metrics(df.iloc[idx], rel[idx], args.top_k) for a, df in by_arm.items()}
-        for a in arms:
+        for name, parts in combos.items():
+            m[name] = arm_metrics(rank_average([by_arm[p].iloc[idx] for p in parts]), rel[idx], args.top_k)
+        for a in view:
             for k in boot_arm[a]:
                 boot_arm[a][k].append(m[a].get(k, np.nan))
         for k in keys:
@@ -272,13 +317,15 @@ def main() -> None:
         for (x, k) in boot_extra:
             p = arms[x][1]
             boot_extra[(x, k)].append(m[p][k] - m[x][k])
+        for (c, p, k) in combo_cmp:
+            combo_cmp[(c, p, k)].append(m[c][k] - m[p][k])
 
     def ci(vals):
         v = np.asarray(vals, float)
         v = v[np.isfinite(v)]
         return (np.percentile(v, 2.5), np.percentile(v, 97.5), float((v > 0).mean())) if v.size else (np.nan,) * 3
 
-    for a in arms:
+    for a in view:
         for k in point[a]:
             lo, hi, _ = ci(boot_arm[a][k])
             summary.loc[summary.arm == a, f"{k}_lo"] = lo
@@ -294,6 +341,10 @@ def main() -> None:
         lo, hi, pp = ci(vals)
         eff_rows.append({"metric": k, "effect": f"ct_at_test:{p}-{x}", "estimate": point[p][k] - point[x][k],
                          "ci_lo": lo, "ci_hi": hi, "p_gt_0": pp})
+    for (c, p, k), vals in combo_cmp.items():
+        lo, hi, pp = ci(vals)
+        eff_rows.append({"metric": k, "effect": f"combo:{c}-{p}", "estimate": point[c][k] - point[p][k],
+                         "ci_lo": lo, "ci_hi": hi, "p_gt_0": pp})
     eff = pd.DataFrame(eff_rows)
 
     summary.to_csv(out / "ablation_arm_summary.csv", index=False)
@@ -301,6 +352,7 @@ def main() -> None:
     pc.to_csv(cache, index=False)
     (out / "ablation_metadata.json").write_text(json.dumps({
         "arms": {a: {"path": str(p), "threshold_from": par, "calibrated_threshold_mm": thr[a]} for a, (p, par) in arms.items()},
+        "combine": combos,
         "n_patients": n, "top_k": args.top_k, "bootstrap": args.bootstrap, "seed": args.seed,
         "floor_rule": f"clean p{args.floor_percentile:g} deep volume <= {args.floor_ml} mL",
         "common_threshold_mm": args.common_threshold, "relevance": "top-k true_thick1_ml",
@@ -313,6 +365,9 @@ def main() -> None:
         print(summary[[c for c in cols if c in summary]].round(3).to_string(index=False))
         main_keys = [f"rho_{s}" for s in SCORES] + [f"mean_{b}" for b in BEHAVIOUR] + ["clean_p90_deep_common_ml"]
         print(eff[eff.metric.isin(main_keys)].round(3).to_string(index=False))
+        if combos:
+            cmp_keys = [f"{m}_deep_common_ml" for m in ("rho", "ap", f"p@{args.top_k}")]
+            print(eff[eff.effect.str.startswith("combo:") & eff.metric.isin(cmp_keys)].round(3).to_string(index=False))
     print(f"Wrote {out}")
 
 
