@@ -71,17 +71,17 @@ SEEDS="92 93" bash scripts/dino_shape/submit_lung_l_ct_contour_ablation_seeds.sh
 
 Same 2x2 design and code, with Lung_R's own corruption calibration.
 
-- Corruption: `configs/dino_shape/lung_r_nsrqa_synthetic_severity_fit_v3method.yaml`,
-  exactly the Lung_L v3 fit method (same families, search, validity rules,
-  dropout targets and objective) run on Lung_R error fields and Month1+2 masks.
-  As for Lung_L, the fit's `best_candidate_training_config.yaml` is used even if
-  the dropout no-op audit fails (Lung_L v3: 17% no-op). v4/v4b deviate from the
-  Lung_L method and are not used here.
+- Corruption: Lung_R's own calibration, the existing v4 fit's
+  `best_candidate_training_config.yaml` (fitted on 52 Lung_R cases; like Lung_L v3 it
+  fails only the dropout no-op audit). v4 runs the Lung_L v3 fit machinery with two
+  settings changed (deepest dropout targets >= 3 mm, HD99 in the objective).
+  `RUN_FIT=1` refits with the Lung_L v3 settings unchanged
+  (`lung_r_nsrqa_synthetic_severity_fit_v3method.yaml`) before preparing.
 - Studies: contour-only `lung_r_nsrqa_month_temporal_family_validated_v1`,
   CT `lung_r_ct_contour_nsrqa_v1`; seeds 91, 92, 93 all trained by the seed submitter.
 
 ```bash
-bash scripts/dino_shape/submit_lung_r_ct_contour_stage1.sh          # fit -> prepare
+bash scripts/dino_shape/submit_lung_r_ct_contour_stage1.sh          # prepare (v4 corruption)
 # after the prepare job finishes:
 ROI=Lung_R bash scripts/dino_shape/submit_lung_l_ct_contour_ablation_seeds.sh
 ```
