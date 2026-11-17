@@ -15,12 +15,16 @@ set -euo pipefail
 # up to 12 h) and prepares from that.
 #
 # Stage 2, once the prepare job has finished, trains all five models for seeds
-# 91, 92, 93 and runs the per-seed ablation:
-#   ROI=Lung_R bash scripts/dino_shape/submit_lung_l_ct_contour_ablation_seeds.sh
+# 91, 92, 93 and runs the per-seed ablation (the exact command is printed below;
+# with RUN_FIT=1 it points at the *_v3method studies):
+#   ROI=Lung_R V3_STUDY=... STUDY_ROOT=... bash scripts/dino_shape/submit_lung_l_ct_contour_ablation_seeds.sh
 
 PROJECT_ROOT="${PROJECT_ROOT:-/home/shaohan/contour_qa_experiments}"
-V3_STUDY="${V3_STUDY:-/scratch/shaohan/contour_QA/lung_r_nsrqa_month_temporal_family_validated_v1}"
 RUN_FIT="${RUN_FIT:-0}"
+# RUN_FIT=1 gets its own study pair so the v4 results stay untouched.
+if [[ "${RUN_FIT}" == "1" ]]; then SUFFIX=v3method; else SUFFIX=v1; fi
+V3_STUDY="${V3_STUDY:-/scratch/shaohan/contour_QA/lung_r_nsrqa_month_temporal_family_validated_${SUFFIX}}"
+CT_STUDY="${CT_STUDY:-/scratch/shaohan/contour_QA/lung_r_ct_contour_nsrqa_${SUFFIX}}"
 FIT_CONFIG="${FIT_CONFIG:-configs/dino_shape/lung_r_nsrqa_synthetic_severity_fit_v3method.yaml}"
 cd "${PROJECT_ROOT}"
 source "${PROJECT_ROOT}/scripts/dino_shape/activate_3dino_env.sh"
@@ -76,5 +80,5 @@ Submitted Lung_R stage 1
   contour-only prepare: ${PREP} -> ${V3_STUDY}
 
 When job ${PREP} has finished, start stage 2 (all five models, seeds 91 92 93):
-  ROI=Lung_R bash scripts/dino_shape/submit_lung_l_ct_contour_ablation_seeds.sh
+  ROI=Lung_R V3_STUDY=${V3_STUDY} STUDY_ROOT=${CT_STUDY} bash scripts/dino_shape/submit_lung_l_ct_contour_ablation_seeds.sh
 EOF

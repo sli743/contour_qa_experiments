@@ -76,7 +76,8 @@ Same 2x2 design and code, with Lung_R's own corruption calibration.
   fails only the dropout no-op audit). v4 runs the Lung_L v3 fit machinery with two
   settings changed (deepest dropout targets >= 3 mm, HD99 in the objective).
   `RUN_FIT=1` refits with the Lung_L v3 settings unchanged
-  (`lung_r_nsrqa_synthetic_severity_fit_v3method.yaml`) before preparing.
+  (`lung_r_nsrqa_synthetic_severity_fit_v3method.yaml`) before preparing, into separate
+  `*_v3method` studies so the v4 results are kept; stage 1 prints the matching stage-2 command.
 - Studies: contour-only `lung_r_nsrqa_month_temporal_family_validated_v1`,
   CT `lung_r_ct_contour_nsrqa_v1`; seeds 91, 92, 93 all trained by the seed submitter.
 
