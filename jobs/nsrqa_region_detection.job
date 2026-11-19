@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+#SBATCH --job-name=nsrqa_regions
+#SBATCH --partition=hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=64G
+#SBATCH --time=08:00:00
+set -euo pipefail
+# Depth-matched truth + region-level detection for the corruption x CT ablation,
+# pooled over seeds (analysis.region_detection_ct). Reads the per-seed arm links
+# that jobs/lung_l_ct_contour_nsrqa_postprocess.job creates under STUDY_ROOT/evaluations.
+# Runs twice: all patients, then without EXCLUDE (cases not judgeable from image +
+# contour), reusing the per-seed cache of the first run.
+#
+# sbatch -p hugo --account=geoffrey_hugo \
+#   --export=ALL,ROI=Lung_R,STUDY_ROOT=/scratch/shaohan/contour_QA/lung_r_ct_contour_nsrqa_v1,EXCLUDE="26 100" \
+#   jobs/nsrqa_region_detection.job
+PROJECT_ROOT="${PROJECT_ROOT:-/home/shaohan/contour_qa_experiments}"
+ROI="${ROI:-Lung_L}"
+ROI_LC="${ROI,,}"
+STUDY_ROOT="${STUDY_ROOT:-/scratch/shaohan/contour_QA/${ROI_LC}_ct_contour_nsrqa_v1}"
+SEEDS="${SEEDS:-91 92 93}"
+EXCLUDE="${EXCLUDE:-}"   # space-separated ids (sbatch --export splits on commas)
+OUT="${OUT:-${STUDY_ROOT}/evaluations_floor_corrected/region_detection}"
+EXTRA_ARGS="${EXTRA_ARGS:-}"   # e.g. "--positive-ml 5 --min-region-ml 1"
+cd "${PROJECT_ROOT}"
+source "${PROJECT_ROOT}/scripts/dino_shape/activate_3dino_env.sh"
+export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
+
+# shellcheck disable=SC2086
+python -m analysis.region_detection_ct --eval-root "${STUDY_ROOT}/evaluations" \
+  --seeds ${SEEDS} --roi "${ROI}" --workers "${SLURM_CPUS_PER_TASK:-4}" ${EXTRA_ARGS} \
+  --output-dir "${OUT}"
+if [[ -n "${EXCLUDE}" ]]; then
+  mkdir -p "${OUT}_assessable"
+  for s in ${SEEDS}; do  # share the per-seed cache
+    ln -sfn "${OUT}/seed${s}" "${OUT}_assessable/seed${s}"
+  done
+  # shellcheck disable=SC2086
+  python -m analysis.region_detection_ct --eval-root "${STUDY_ROOT}/evaluations" \
+    --seeds ${SEEDS} --roi "${ROI}" ${EXTRA_ARGS} --exclude "${EXCLUDE// /,}" --reuse-cache \
+    --output-dir "${OUT}_assessable"
+fi

@@ -86,3 +86,23 @@ bash scripts/dino_shape/submit_lung_r_ct_contour_stage1.sh          # prepare (v
 # after the prepare job finishes:
 ROI=Lung_R bash scripts/dino_shape/submit_lung_l_ct_contour_ablation_seeds.sh
 ```
+
+## Region-level detection (depth-matched truth)
+
+`analysis.region_detection_ct` re-scores the saved masks of all seeds:
+
+- **Truth uses the same depth rule as the QA score.** It is the autoseg-vs-approved error volume at least 4.5 mm from the other surface. A patient is positive if that volume is at least `--positive-ml`, rather than being in a fixed top 10.
+- **True error regions.** Each region is one connected piece of error with at least 0.5 mL of deep core. A region counts as detected when the model's deep change covers at least 10% of its core.
+- **Model regions.** Each is one piece of deep model change. It counts as correct when at least half of it lies in true error.
+- **Reported:**
+  - region recall and precision, deep-error recall and change precision by volume
+  - false regions per case, on both the autoseg input and the clean approved input
+  - recall@k, located recall@k (also needs a detected region) and capture@k at review budgets
+  - the 2×2 effects, plus direct C1I1−C0I0 and C1I1−ct_only comparisons
+
+```bash
+EXCLUDE="26 100" sbatch -p hugo --account=geoffrey_hugo \
+  --export=ALL,ROI=Lung_R,STUDY_ROOT=/scratch/shaohan/contour_QA/lung_r_ct_contour_nsrqa_v1 \
+  jobs/nsrqa_region_detection.job
+```
+With `EXCLUDE` set, a second run without those patients is written to `<OUT>_assessable`. It reuses the per-seed cache.
