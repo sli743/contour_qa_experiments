@@ -15,6 +15,12 @@ Design choices (see scripts/dino_shape/LUNG_L_CT_CONTOUR_NSRQA.md):
 * 3DINO patch tokens are coarse (one token per 16^3 voxels at 1.5 mm), so a
   small trainable full-resolution CT stem feeds the last decoder stages.  Each
   injection is a zero-initialised 1x1 conv, again starting as the baseline.
+* ``image_skip_inputs: ct_mask`` (early fusion) feeds the stem [CT, contour] as
+  two channels, so its first conv can compare the input boundary with the CT
+  voxel by voxel at full resolution; with ``ct`` (default) the contour reaches
+  the decoder only through the 16^3 tokens.  The mask channel is gated by
+  ``image_present`` together with the CT, so CT dropout also trains the
+  token-only path.
 * ``image_present`` (one value per case) switches all CT pathways off.  The
   trainer uses it for CT dropout, so the decoder cannot rely on CT alone, and
   the evaluator uses it for the CT-reliance check.
@@ -53,6 +59,7 @@ DEFAULT_IMAGE_CFG: Dict[str, Any] = {
     "fusion_hidden_dim": 256,
     "image_skip_channels": 16,
     "image_skip_last_n_stages": 2,    # 0 disables the full-resolution CT stem
+    "image_skip_inputs": "ct",        # ct | ct_mask (two-channel CT + contour stem)
     "train_image_dropout": 0.3,
     "contour_input": "mask",          # mask | empty (CT-only segmenter arm)
     "cache_image_tokens": True,
@@ -169,12 +176,15 @@ class ImageTokenFusion(nn.Module):
         }
 
 
+SKIP_INPUT_CHANNELS = {"ct": 1, "ct_mask": 2}
+
+
 class ImageSkipStem(nn.Module):
-    def __init__(self, channels: int = 16) -> None:
+    def __init__(self, channels: int = 16, in_channels: int = 1) -> None:
         super().__init__()
         c = int(channels)
         self.net = nn.Sequential(
-            nn.Conv3d(1, c, 3, padding=1, bias=False),
+            nn.Conv3d(int(in_channels), c, 3, padding=1, bias=False),
             nn.InstanceNorm3d(c, affine=True),
             nn.LeakyReLU(0.1, inplace=True),
             nn.Conv3d(c, c, 3, padding=1, bias=False),
@@ -232,7 +242,13 @@ class ImageContourHead(nn.Module):
         super().__init__()
         self.fusion = ImageTokenFusion(embed_dim, icfg["fusion"], int(icfg["fusion_hidden_dim"]))
         last_n = int(icfg["image_skip_last_n_stages"])
-        self.image_stem = ImageSkipStem(int(icfg["image_skip_channels"])) if last_n > 0 else None
+        self.skip_inputs = str(icfg.get("image_skip_inputs", "ct"))
+        if self.skip_inputs not in SKIP_INPUT_CHANNELS:
+            raise ValueError(f"image_skip_inputs must be one of {sorted(SKIP_INPUT_CHANNELS)}, got {self.skip_inputs}")
+        if self.skip_inputs != "ct" and last_n <= 0:
+            raise ValueError("image_skip_inputs=ct_mask needs image_skip_last_n_stages > 0")
+        self.image_stem = (ImageSkipStem(int(icfg["image_skip_channels"]), SKIP_INPUT_CHANNELS[self.skip_inputs])
+                           if last_n > 0 else None)
         self.mask_decoder = ImageGuidedMaskDecoder3D(
             embed_dim=embed_dim,
             channels=decoder_channels,
@@ -339,7 +355,13 @@ class Frozen3DINOImageContourAutoencoder(nn.Module):
         image_tokens = self._encode_image(padded_image, image_cache_keys)
 
         fused = self.decoder.fusion(mask_tokens, image_tokens, image_present)
-        skip = self.decoder.image_stem(padded_image) if self.decoder.image_stem is not None else None
+        skip = None
+        if self.decoder.image_stem is not None:
+            stem_in = padded_image
+            if self.decoder.skip_inputs == "ct_mask":
+                # contour in {-1, 1} like the CT window; padding = background (-1)
+                stem_in = torch.cat([padded_image, 2.0 * padded_mask.to(padded_image.dtype) - 1.0], dim=1)
+            skip = self.decoder.image_stem(stem_in)
         logits_padded = self.decoder.mask_decoder(
             fused, tuple(int(v) for v in padded_mask.shape[2:]),
             spatial_context=spatial_context, image_skip=skip, image_present=image_present,

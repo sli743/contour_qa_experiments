@@ -62,8 +62,21 @@ ARMS = {  # label -> arm directory under --eval-root (postprocess job layout)
     "C0I1": "ct_contour_no_corruption",
     "C1I1": "ct_contour_corruption",
     "ct_only": "ct_only_segmenter",
+    # early-fusion variant (image_skip_inputs: ct_mask), trained in its own study;
+    # point at it with --arm-root C1I1m=<maskstem study>/evaluations/ct_mask_contour_corruption
+    "C1I1m": "ct_mask_contour_corruption",
 }
-DIRECT = [("C1I1", "C0I0"), ("C1I1", "ct_only")]
+DEFAULT_ARMS = ["C0I0", "C1I0", "C0I1", "C1I1", "ct_only"]
+DIRECT = [("C1I1", "C0I0"), ("C1I1", "ct_only"), ("C1I1m", "C1I1"), ("C1I1m", "C0I0")]
+
+
+def arm_root(arm: str, args) -> Path:
+    """Arm directory (holding seed<S>/): --arm-root override, else <eval-root>/<ARMS[arm]>."""
+    for spec in args.arm_root:
+        lab, _, path = spec.partition("=")
+        if lab == arm:
+            return Path(path)
+    return Path(args.eval_root) / ARMS[arm]
 
 
 def depth_map(inp: np.ndarray, other: np.ndarray, spacing, vml: float, min_component_ml: float,
@@ -161,6 +174,8 @@ def score_case(job):
         "arm": arm, "patient_id": pid,
         "true_deep_ml": float(t_deep.sum() * vml),
         "n_true_regions": len(reg_rows), "n_detected": int(n_det),
+        **{f"n_{w}_{kd}": sum(r["kind"] == kd and (w == "true" or r["detected"]) for r in reg_rows)
+           for kd in ("missing", "extra") for w in ("true", "det")},
         "true_core_ml": float(sum(r["core_ml"] for r in reg_rows)),
         "core_covered_ml": float(sum(r["core_ml"] * r["deep_coverage"] for r in reg_rows)),
         "deep_change_ml": float(m_deep.sum() * vml),
@@ -189,7 +204,7 @@ def collect(seed: str, args) -> tuple[pd.DataFrame, pd.DataFrame]:
                                         "correct_frac", "fov_margin_mm")}
     jobs = []
     for arm in args.arms:
-        root = Path(args.eval_root) / ARMS[arm] / f"seed{seed}"
+        root = arm_root(arm, args) / f"seed{seed}"
         cases = case_dirs(root / "actual_autoseg_cases" / tail)
         clean = case_dirs(root / "clean_approved_cases" / tail)
         if not cases:
@@ -224,6 +239,8 @@ def metrics(df: pd.DataFrame, pos: np.ndarray, truth: np.ndarray, ks: dict[str, 
     score = df["deep_change_ml"].to_numpy()
     out = {
         "region_recall": div(s.n_detected, s.n_true_regions),
+        "recall_missing": div(s.get("n_det_missing", np.nan), s.get("n_true_missing", 0)),
+        "recall_extra": div(s.get("n_det_extra", np.nan), s.get("n_true_extra", 0)),
         "deep_error_recall": div(s.core_covered_ml, s.true_core_ml),
         "region_precision": div(s.n_model_correct, s.n_model_regions),
         "deep_change_precision": div(s.deep_change_in_error_ml, s.deep_change_ml),
@@ -246,7 +263,9 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--eval-root", required=True, help="<ct study>/evaluations (postprocess layout)")
     ap.add_argument("--seeds", nargs="+", required=True)
-    ap.add_argument("--arms", nargs="+", default=list(ARMS), choices=list(ARMS))
+    ap.add_argument("--arms", nargs="+", default=DEFAULT_ARMS, choices=list(ARMS))
+    ap.add_argument("--arm-root", action="append", default=[],
+                    help="LABEL=<arm dir> (containing seed<S>/) for an arm outside --eval-root")
     ap.add_argument("--roi", default="Lung_L")
     ap.add_argument("--mode", default="autoseg_centered")
     ap.add_argument("--split", default="testing1")
@@ -353,14 +372,14 @@ def main() -> None:
     tt.assign(positive=pos).to_csv(out / "patient_truth.csv", index=False)
     regions_all.to_csv(out / "regions_all_seeds.csv", index=False)
     (out / "region_metadata.json").write_text(json.dumps({
-        "eval_root": args.eval_root, "seeds": args.seeds, "roi": args.roi, "arms": {a: ARMS[a] for a in args.arms},
+        "eval_root": args.eval_root, "seeds": args.seeds, "roi": args.roi, "arms": {a: str(arm_root(a, args)) for a in args.arms},
         "n_patients": n, "excluded": sorted(excl), "n_positive": int(pos.sum()), "positive_ml": args.positive_ml,
         "depth_threshold_mm": args.t, "min_region_ml": args.min_region_ml, "detect_frac": args.detect_frac,
         "correct_frac": args.correct_frac, "budgets": ks, "bootstrap": args.bootstrap,
         "ci": "paired patient bootstrap of the seed-mean (case sampling); _sd = training spread over seeds",
     }, indent=2))
 
-    show = ["region_recall", "deep_error_recall", "region_precision", "deep_change_precision",
+    show = ["region_recall", "recall_missing", "recall_extra", "deep_error_recall", "region_precision", "deep_change_precision",
             "fp_regions_per_case", "clean_regions_per_case", "rho_truth_deep", "ap"] + \
            [f"{m}@{b}" for b in ks for m in ("recall", "located_recall", "capture")]
     with pd.option_context("display.width", 250, "display.max_columns", 40):
@@ -368,7 +387,7 @@ def main() -> None:
         print(summary[["arm"] + show].round(3).to_string(index=False))
         print()
         print(eff[eff.effect.isin(["interaction", "corruption_without_ct", "corruption_with_ct",
-                                   "ct_with_corruption", "C1I1-C0I0", "C1I1-ct_only"])]
+                                   "ct_with_corruption", "C1I1-C0I0", "C1I1-ct_only", "C1I1m-C1I1", "C1I1m-C0I0"])]
               .sort_values(["metric", "effect"]).round(3).to_string(index=False))
     print(f"Wrote {out}")
 

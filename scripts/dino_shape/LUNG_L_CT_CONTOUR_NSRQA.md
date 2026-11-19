@@ -106,3 +106,26 @@ EXCLUDE="26 100" sbatch -p hugo --account=geoffrey_hugo \
   jobs/nsrqa_region_detection.job
 ```
 With `EXCLUDE` set, a second run without those patients is written to `<OUT>_assessable`. It reuses the per-seed cache.
+
+Region recall is also reported separately for missing-lung regions (`recall_missing`) and extra-lung regions (`recall_extra`).
+
+## Early fusion: CT + contour stem (`image_skip_inputs: ct_mask`)
+
+In C1I1, the contour reaches the decoder only through the 16³ 3DINO tokens, while the full-resolution stem sees CT alone. With `image_skip_inputs: ct_mask`, the stem takes `[CT, 2·mask−1]` instead. Its first conv can then compare the input boundary with the image voxel by voxel, and the result is injected at ½ and full resolution as before.
+
+The injections are still zero-initialised and gated by `image_present`, so CT dropout also removes the mask channel. The default stays `ct`, so old checkpoints load unchanged.
+
+`submit_ct_mask_stem.sh` retrains only C1I1 as `ct_mask_contour_corruption` (C1I1m):
+- It copies each seed's existing C1I1 config and changes only the stem.
+- Each model goes into its own study, `<roi>_ct_contour_nsrqa_maskstem`.
+- The Month3, clean-approved and CT-absent evals run per seed.
+- Region detection then runs over all six arms (`--arm-root` points C1I1m at the new study) and reports C1I1m−C1I1 and C1I1m−C0I0.
+- `EXCLUDE` defaults to `152` for Lung_L and `26 100` for Lung_R. Lung_L 152 is a reference error: the approved contour includes stomach gas.
+
+There is no no-corruption mask-stem arm. Without corruption, the full-resolution mask would let the model learn to copy its input.
+
+```bash
+ROI=Lung_L bash scripts/dino_shape/submit_ct_mask_stem.sh
+ROI=Lung_R bash scripts/dino_shape/submit_ct_mask_stem.sh
+```
+The patient-level pooled ablation also takes `--exclude` (e.g. `--exclude 152` for Lung_L).

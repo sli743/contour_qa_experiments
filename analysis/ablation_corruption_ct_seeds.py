@@ -44,6 +44,7 @@ def main() -> None:
                     help="NAME=ARM+ARM rank-average combination; default: the combinations recorded in the "
                          "seed dirs' ablation_metadata.json (must agree across seeds)")
     ap.add_argument("--top-k", type=int, default=10)
+    ap.add_argument("--exclude", default="", help="comma list of patient ids to leave out (e.g. reference errors)")
     ap.add_argument("--bootstrap", type=int, default=2000)
     ap.add_argument("--output-dir", required=True)
     args = ap.parse_args()
@@ -76,9 +77,11 @@ def main() -> None:
             raise SystemExit(f"seeds record different --combine sets: {recorded}; pass --combine explicitly")
         combos = parse_combos([f"{c}={'+'.join(p)}" for c, p in found[0].items()], arms)
     all_arms = arms + list(combos)
-    pids = sorted(set.intersection(*[set(pc[pc.arm == a].patient_id) for pc in seeds.values() for a in arms]),
+    excl = {e.strip() for e in args.exclude.split(",") if e.strip()}
+    pids = sorted(set.intersection(*[set(pc[pc.arm == a].patient_id) for pc in seeds.values() for a in arms]) - excl,
                   key=lambda s: (len(s), s))
     n = len(pids)
+    print(f"n={n} patients (excluded: {sorted(excl) or 'none'})")
     by = {s: {a: pc[pc.arm == a].set_index("patient_id").loc[pids].reset_index() for a in arms}
           for s, pc in seeds.items()}
     # Truth is the autoseg-vs-approved error: identical across arms/seeds.
@@ -166,7 +169,7 @@ def main() -> None:
     pd.DataFrame(eff_seed_rows).to_csv(out / "ablation_effects_per_seed.csv", index=False)
     (out / "ablation_metadata.json").write_text(json.dumps({
         "seeds": {s: str(p.partition("=")[2]) for s, p in zip(seeds, args.ablation_dir)},
-        "n_patients": n, "top_k": args.top_k, "bootstrap": args.bootstrap, "combine": combos, "roi": roi,
+        "n_patients": n, "excluded": sorted(excl), "top_k": args.top_k, "bootstrap": args.bootstrap, "combine": combos, "roi": roi,
         "ci": "paired patient bootstrap of the seed-mean (case sampling); seed_sd = training spread",
     }, indent=2))
 
