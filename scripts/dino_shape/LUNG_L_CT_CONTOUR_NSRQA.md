@@ -129,3 +129,26 @@ ROI=Lung_L bash scripts/dino_shape/submit_ct_mask_stem.sh
 ROI=Lung_R bash scripts/dino_shape/submit_ct_mask_stem.sh
 ```
 The patient-level pooled ablation also takes `--exclude` (e.g. `--exclude 152` for Lung_L).
+
+## Leak corruption: region growth (`stochastic_region_growth`)
+
+The fitted corruption never adds deep extra lung:
+- The branches that add lung (warp, distance noise, combined, outward global offset) move the boundary by at most about 4 mm.
+- The region dropout only removes lung.
+
+Real excess errors are 5–80 mm deep. `stochastic_region_growth` is the outward counterpart of the dropout:
+- It uses the same localized random field, grown into the background from a seed on the outer boundary shell, so the leak is always attached to the contour.
+- Its size, as a fraction of lung volume, is sampled log-uniformly.
+- Its maximum depth outside the surface must fall in a set window.
+
+`analysis.add_growth_corruption` sets that size and depth window from p10–p90 of each training patient's deepest excess component at 4.5 mm or deeper, taken from the ROI's own `error_components.csv`. It gives the branch the dropout's weight. The branch is off unless configured, so older configs are unchanged.
+
+`submit_growth_corruption.sh` retrains C1I1 and C1I0 for each seed, adding only that branch to each config. The new arms are C1I1g and C1I0g, in `<roi>_ct_contour_nsrqa_growth`. Region detection then compares them with the existing arms, with `recall_extra` and false regions on approved contours as the main readouts.
+
+```bash
+# check the generator on 3 training labels first (CPU)
+python -m analysis.add_growth_corruption --config <ct study>/configs/ct_contour_corruption_seed91.yaml \
+  --error-components <roi>_error_field_characterization_v1/error_components.csv --output /tmp/g.yaml --smoke 5
+ROI=Lung_L bash scripts/dino_shape/submit_growth_corruption.sh
+ROI=Lung_R bash scripts/dino_shape/submit_growth_corruption.sh
+```

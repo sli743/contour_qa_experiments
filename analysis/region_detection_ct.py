@@ -65,9 +65,13 @@ ARMS = {  # label -> arm directory under --eval-root (postprocess job layout)
     # early-fusion variant (image_skip_inputs: ct_mask), trained in its own study;
     # point at it with --arm-root C1I1m=<maskstem study>/evaluations/ct_mask_contour_corruption
     "C1I1m": "ct_mask_contour_corruption",
+    # region-growth (leak) corruption, also in its own study (--arm-root)
+    "C1I1g": "ct_contour_corruption_growth",
+    "C1I0g": "contour_only_growth",
 }
 DEFAULT_ARMS = ["C0I0", "C1I0", "C0I1", "C1I1", "ct_only"]
-DIRECT = [("C1I1", "C0I0"), ("C1I1", "ct_only"), ("C1I1m", "C1I1"), ("C1I1m", "C0I0")]
+DIRECT = [("C1I1", "C0I0"), ("C1I1", "ct_only"), ("C1I1m", "C1I1"), ("C1I1m", "C0I0"),
+          ("C1I1g", "C1I1"), ("C1I0g", "C1I0"), ("C1I1g", "C0I0")]
 
 
 def arm_root(arm: str, args) -> Path:
@@ -387,7 +391,8 @@ def main() -> None:
         print(summary[["arm"] + show].round(3).to_string(index=False))
         print()
         print(eff[eff.effect.isin(["interaction", "corruption_without_ct", "corruption_with_ct",
-                                   "ct_with_corruption", "C1I1-C0I0", "C1I1-ct_only", "C1I1m-C1I1", "C1I1m-C0I0"])]
+                                   "ct_with_corruption", "C1I1-C0I0", "C1I1-ct_only", "C1I1m-C1I1", "C1I1m-C0I0",
+                                   "C1I1g-C1I1", "C1I0g-C1I0", "C1I1g-C0I0"])]
               .sort_values(["metric", "effect"]).round(3).to_string(index=False))
     print(f"Wrote {out}")
 

@@ -471,6 +471,134 @@ def stochastic_region_dropout(
     }
 
 
+def _outside_geometry(geometry: Dict[str, object], target: np.ndarray, spacing_zyx: Sequence[float]) -> Dict[str, object]:
+    """Lazily add the outward geometry (outer boundary shell, distance outside) to a cache entry."""
+    if "outside_depth_map_mm" not in geometry:
+        outer = ndimage.binary_dilation(target, structure=_STRUCTURE_6) & ~target
+        points = np.argwhere(outer)
+        if len(points) == 0:
+            raise ValueError("Target has no outer boundary voxels (fills the crop).")
+        geometry["outer_boundary_points"] = points
+        geometry["outside_depth_map_mm"] = ndimage.distance_transform_edt(
+            ~target, sampling=spacing_zyx).astype(np.float16)  # halves the per-patient cache
+    return geometry
+
+
+def stochastic_region_growth(
+    target: np.ndarray,
+    spacing_zyx: Sequence[float],
+    spec: Dict,
+    rng: random.Random,
+    cache_key: str | None = None,
+) -> Tuple[np.ndarray, Dict[str, object]]:
+    """Add one smooth, irregular region attached to the target boundary (a leak).
+
+    The outward counterpart of :func:`stochastic_region_dropout`: the same
+    localized random field, but grown into the background from a seed on the
+    outer boundary shell. ``added_fraction`` is relative to the target volume and
+    the depth window is the distance outside the target surface, so both can be
+    taken from excess-type error components exactly as the dropout's are taken
+    from missing-type ones. The result is target | region (one component more
+    is never created: the region touches the target).
+    """
+    overall_start = time.perf_counter()
+    target = target.astype(bool, copy=False)
+    spacing = np.asarray(spacing_zyx, dtype=np.float32)
+    geometry = _outside_geometry(_cache_geometry(cache_key, target, spacing_zyx), target, spacing_zyx)
+    seeds = geometry["outer_boundary_points"]
+    target_voxels = int(geometry["target_voxels"])
+    depth_map_mm = geometry["outside_depth_map_mm"]
+    outside = ~target
+
+    np_rng = np.random.default_rng(rng.randrange(2**32))
+    grid_bounds = spec.get("coarse_grid_points_zyx", {})
+    grid_min = grid_bounds.get("min", [4, 4, 4])
+    grid_max = grid_bounds.get("max", [8, 8, 8])
+    added_bounds = spec.get("added_fraction", [0.001, 0.02])
+    corr_bounds = spec.get("correlation_length_mm", [15.0, 45.0])
+    envelope_bounds = spec.get("localization_sigma_mm", [20.0, 55.0])
+    field_weight = float(spec.get("random_field_weight", 1.0))
+    localization_weight = float(spec.get("localization_weight", 1.5))
+    envelope_cutoff_sigma = float(spec.get("localization_cutoff_sigma", 3.5))
+    max_attempts = int(spec.get("max_attempts", 24))
+    min_depth = float(spec.get("min_max_depth_mm", 4.5))
+    max_depth = float(spec.get("max_max_depth_mm", 30.0))
+    # relative: leak sizes span orders of magnitude, an absolute window would accept anything
+    fraction_rel_tolerance = float(spec.get("added_fraction_relative_tolerance", 0.5))
+    threshold_search_steps = int(spec.get("threshold_search_steps", 12))
+
+    rejection_counts: Dict[str, int] = {}
+    last_meta: Dict[str, object] = {}
+    for attempt in range(1, max_attempts + 1):
+        grid_shape = tuple(rng.randint(int(a), int(b)) for a, b in zip(grid_min, grid_max))
+        correlation_mm = _uniform(rng, corr_bounds)
+        field = _smooth_coarse_random_field(
+            np_rng, grid_shape, target.shape, spacing_zyx, correlation_mm,
+            order=int(spec.get("upsample_order", 1)),
+        )
+        seed = seeds[rng.randrange(len(seeds))]
+        localization_sigma_mm = _uniform(rng, envelope_bounds)
+        score = _localized_score(field, seed, spacing, localization_sigma_mm,
+                                 field_weight, localization_weight, envelope_cutoff_sigma)
+        if str(spec.get("added_fraction_sampling", "log")) == "log":
+            # excess components are heavy-tailed (median << p90); linear sampling would
+            # make most leaks near the upper bound
+            lo_f, hi_f = (max(float(v), 1e-7) for v in added_bounds)
+            target_fraction = float(np.exp(rng.uniform(np.log(lo_f), np.log(hi_f))))
+        else:
+            target_fraction = _uniform(rng, added_bounds)
+        region, threshold, search_error = _best_seed_component_for_fraction(
+            score, outside, seed, target_fraction, target_voxels, threshold_search_steps
+        )
+        added_voxels = int(region.sum())
+        added_fraction = added_voxels / max(target_voxels, 1)
+
+        reasons = []
+        if added_voxels == 0:
+            reasons.append("empty_added_region")
+        elif not region[tuple(seed)]:
+            # threshold rose above the seed: the search fell back to a component
+            # elsewhere that need not touch the target
+            reasons.append("region_detached_from_seed")
+        if abs(added_fraction - target_fraction) > fraction_rel_tolerance * target_fraction:
+            reasons.append("added_fraction_outside_tolerance")
+        depth_max = float(np.max(depth_map_mm[region])) if added_voxels else 0.0
+        if added_voxels and depth_max < min_depth:
+            reasons.append("maximum_depth_below_minimum")
+        if added_voxels and depth_max > max_depth:
+            reasons.append("maximum_depth_above_maximum")
+        for reason in reasons:
+            rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
+        last_meta = {
+            "growth_attempt": attempt,
+            "growth_rejection_reason": ";".join(reasons),
+            "growth_target_added_fraction": float(target_fraction),
+            "growth_added_fraction": float(added_fraction),
+            "growth_added_voxels": added_voxels,
+            "growth_correlation_length_mm": float(correlation_mm),
+            "growth_localization_sigma_mm": float(localization_sigma_mm),
+            "growth_threshold": threshold,
+            "growth_fraction_search_error": float(search_error),
+            "growth_seed_z": int(seed[0]), "growth_seed_y": int(seed[1]), "growth_seed_x": int(seed[2]),
+            "growth_depth_max_mm": depth_max,
+            "growth_depth_median_mm": float(np.median(depth_map_mm[region].astype(np.float32))) if added_voxels else 0.0,
+        }
+        if not reasons:
+            return target | region, {
+                **last_meta,
+                "growth_total_attempts": attempt,
+                "growth_rejection_counts_json": str(rejection_counts),
+                "growth_timing_total_seconds": time.perf_counter() - overall_start,
+            }
+    return target.copy(), {
+        **last_meta,
+        "growth_total_attempts": max_attempts,
+        "growth_rejection_counts_json": str(rejection_counts),
+        "growth_timing_total_seconds": time.perf_counter() - overall_start,
+        "growth_rejected_to_clean": 1,
+    }
+
+
 def stochastic_region_dropout_corruption(
     clean: torch.Tensor,
     cfg: Dict,
@@ -499,15 +627,16 @@ def stochastic_region_dropout_corruption(
             "combined",
             "stochastic_region_dropout",
             "global_boundary_offset",
+            "stochastic_region_growth",  # off unless configured (older configs unchanged)
         ]
-        defaults = [0.10, 0.20, 0.15, 0.20, 0.15]
+        defaults = [0.10, 0.20, 0.15, 0.20, 0.15, 0.0]
         weights = [float(branches.get(name, default)) for name, default in zip(names, defaults)]
         total = sum(weights)
         if total <= 0:
             raise ValueError("At least one non-clean branch probability must be positive.")
         draw = rng.random() * total
         cumulative = 0.0
-        branch = names[-1]
+        branch = [n for n, w in zip(names, weights) if w > 0][-1]
         for name, weight in zip(names, weights):
             cumulative += weight
             if draw <= cumulative:
@@ -540,6 +669,12 @@ def stochastic_region_dropout_corruption(
         )
         metadata.update(meta)
         if int(meta.get("global_boundary_offset_rejected_to_clean", 0)):
+            metadata["requested_branch"] = branch
+            metadata["branch"] = "rejected_to_clean"
+    elif branch == "stochastic_region_growth":
+        result, meta = stochastic_region_growth(original, spacing_zyx, spec.get("growth", {}), rng, cache_key=cache_key)
+        metadata.update(meta)
+        if int(meta.get("growth_rejected_to_clean", 0)):
             metadata["requested_branch"] = branch
             metadata["branch"] = "rejected_to_clean"
     metadata["branch_corruption_seconds"] = time.perf_counter() - branch_start
