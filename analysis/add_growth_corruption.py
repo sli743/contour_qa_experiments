@@ -112,7 +112,7 @@ def smoke(cfg: dict, n_labels: int = 3, draws: int = 10, seed: int = 0) -> None:
         print(f"{f.name}: lung {target.sum() * vml:.0f} mL, accepted {len(acc)}/{draws}, "
               f"added mL {[round(r[1], 1) for r in acc]}, max depth mm {[round(r[2], 1) for r in acc]}, "
               f"target kept {all(r[3] for r in res)}, attempts {[r[4] for r in res]}, "
-              f"s/draw {np.mean([r[5] for r in res]):.1f}")
+              f"s first draw (incl. cache) {res[0][5]:.1f}, s/draw after {np.mean([r[5] for r in res[1:]] or [0]):.2f}")
 
 
 def main() -> None:

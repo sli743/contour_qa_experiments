@@ -484,6 +484,40 @@ def _outside_geometry(geometry: Dict[str, object], target: np.ndarray, spacing_z
     return geometry
 
 
+def _coarse_field(np_rng: np.random.Generator, grid_shape: Sequence[int], shape: Sequence[int],
+                  spacing_zyx: Sequence[float], correlation_mm: float, order: int) -> Tuple[np.ndarray, float, float]:
+    """Smoothed coarse field plus the mean/std of its full-resolution upsampling.
+
+    Same field as :func:`_smooth_coarse_random_field`, but kept coarse so it can be
+    evaluated on a sub-box only; the normalisation is estimated on a stride-4 grid.
+    """
+    coarse = np_rng.normal(0.0, 1.0, size=tuple(int(v) for v in grid_shape)).astype(np.float32)
+    coarse = ndimage.gaussian_filter(
+        coarse, sigma=_coarse_sigma_from_mm(shape, grid_shape, spacing_zyx, correlation_mm), mode="reflect")
+    sample = _sample_coarse(coarse, shape, tuple(slice(0, int(n), 4) for n in shape), order)
+    std = float(sample.std())
+    return coarse, float(sample.mean()), (std if std > 1e-8 else 1.0)
+
+
+def _sample_coarse(coarse: np.ndarray, shape: Sequence[int], box: Sequence[slice], order: int) -> np.ndarray:
+    """Evaluate the upsampled coarse field on a box (same index mapping as ndimage.zoom)."""
+    axes = [np.arange(s.start, s.stop, s.step or 1, dtype=np.float32) * (float(c - 1) / max(int(n) - 1, 1))
+            for s, c, n in zip(box, coarse.shape, shape)]
+    grid = np.meshgrid(*axes, indexing="ij")
+    return ndimage.map_coordinates(coarse, grid, order=int(order), mode="reflect",
+                                   prefilter=bool(int(order) > 1)).astype(np.float32, copy=False)
+
+
+def _touches_open_face(region: np.ndarray, lo: np.ndarray, hi: np.ndarray, shape: Sequence[int]) -> bool:
+    """True if the region reaches a box face that is not the crop border (it may continue outside)."""
+    for ax in range(region.ndim):
+        if lo[ax] > 0 and region.take(0, axis=ax).any():
+            return True
+        if hi[ax] < shape[ax] and region.take(-1, axis=ax).any():
+            return True
+    return False
+
+
 def stochastic_region_growth(
     target: np.ndarray,
     spacing_zyx: Sequence[float],
@@ -508,7 +542,13 @@ def stochastic_region_growth(
     seeds = geometry["outer_boundary_points"]
     target_voxels = int(geometry["target_voxels"])
     depth_map_mm = geometry["outside_depth_map_mm"]
-    outside = ~target
+    shape = np.asarray(target.shape, dtype=int)
+    voxel_mm3 = float(np.prod(spacing))
+    order = int(spec.get("upsample_order", 1))
+    # Work in a box around the seed: labelling the whole background 16x per attempt
+    # cost ~15 s per leak. The box doubles whenever the region reaches one of its
+    # inner faces, so the accepted region is exactly the full-volume component.
+    box_margin_mm = float(spec.get("box_margin_mm", 20.0))
 
     np_rng = np.random.default_rng(rng.randrange(2**32))
     grid_bounds = spec.get("coarse_grid_points_zyx", {})
@@ -532,14 +572,9 @@ def stochastic_region_growth(
     for attempt in range(1, max_attempts + 1):
         grid_shape = tuple(rng.randint(int(a), int(b)) for a, b in zip(grid_min, grid_max))
         correlation_mm = _uniform(rng, corr_bounds)
-        field = _smooth_coarse_random_field(
-            np_rng, grid_shape, target.shape, spacing_zyx, correlation_mm,
-            order=int(spec.get("upsample_order", 1)),
-        )
-        seed = seeds[rng.randrange(len(seeds))]
+        coarse, f_mean, f_std = _coarse_field(np_rng, grid_shape, target.shape, spacing_zyx, correlation_mm, order)
+        seed = np.asarray(seeds[rng.randrange(len(seeds))], dtype=int)
         localization_sigma_mm = _uniform(rng, envelope_bounds)
-        score = _localized_score(field, seed, spacing, localization_sigma_mm,
-                                 field_weight, localization_weight, envelope_cutoff_sigma)
         if str(spec.get("added_fraction_sampling", "log")) == "log":
             # excess components are heavy-tailed (median << p90); linear sampling would
             # make most leaks near the upper bound
@@ -547,22 +582,35 @@ def stochastic_region_growth(
             target_fraction = float(np.exp(rng.uniform(np.log(lo_f), np.log(hi_f))))
         else:
             target_fraction = _uniform(rng, added_bounds)
-        region, threshold, search_error = _best_seed_component_for_fraction(
-            score, outside, seed, target_fraction, target_voxels, threshold_search_steps
-        )
+        radius_mm = box_margin_mm + 1.5 * (target_fraction * target_voxels * voxel_mm3) ** (1.0 / 3.0)
+        while True:
+            rv = np.ceil(radius_mm / spacing).astype(int)
+            lo = np.maximum(seed - rv, 0)
+            hi = np.minimum(seed + rv + 1, shape)
+            box = tuple(slice(int(a), int(b)) for a, b in zip(lo, hi))
+            field = (_sample_coarse(coarse, target.shape, box, order) - f_mean) / f_std
+            score = _localized_score(field, seed - lo, spacing, localization_sigma_mm,
+                                     field_weight, localization_weight, envelope_cutoff_sigma)
+            region, threshold, search_error = _best_seed_component_for_fraction(
+                score, ~target[box], seed - lo, target_fraction, target_voxels, threshold_search_steps
+            )
+            if not _touches_open_face(region, lo, hi, target.shape):
+                break
+            radius_mm *= 2.0
         added_voxels = int(region.sum())
         added_fraction = added_voxels / max(target_voxels, 1)
+        box_depth = depth_map_mm[box]
 
         reasons = []
         if added_voxels == 0:
             reasons.append("empty_added_region")
-        elif not region[tuple(seed)]:
+        elif not region[tuple(seed - lo)]:
             # threshold rose above the seed: the search fell back to a component
             # elsewhere that need not touch the target
             reasons.append("region_detached_from_seed")
         if abs(added_fraction - target_fraction) > fraction_rel_tolerance * target_fraction:
             reasons.append("added_fraction_outside_tolerance")
-        depth_max = float(np.max(depth_map_mm[region])) if added_voxels else 0.0
+        depth_max = float(np.max(box_depth[region])) if added_voxels else 0.0
         if added_voxels and depth_max < min_depth:
             reasons.append("maximum_depth_below_minimum")
         if added_voxels and depth_max > max_depth:
@@ -581,10 +629,13 @@ def stochastic_region_growth(
             "growth_fraction_search_error": float(search_error),
             "growth_seed_z": int(seed[0]), "growth_seed_y": int(seed[1]), "growth_seed_x": int(seed[2]),
             "growth_depth_max_mm": depth_max,
-            "growth_depth_median_mm": float(np.median(depth_map_mm[region].astype(np.float32))) if added_voxels else 0.0,
+            "growth_depth_median_mm": float(np.median(box_depth[region].astype(np.float32))) if added_voxels else 0.0,
+            "growth_box_radius_mm": float(radius_mm),
         }
         if not reasons:
-            return target | region, {
+            out = target.copy()
+            out[box] |= region
+            return out, {
                 **last_meta,
                 "growth_total_attempts": attempt,
                 "growth_rejection_counts_json": str(rejection_counts),
