@@ -1,0 +1,26 @@
+#!/bin/bash
+#SBATCH --job-name=sup_end_conv
+#SBATCH -p hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=32G
+#SBATCH --time=02:00:00
+
+set -euo pipefail
+
+# Is the ROI's superior end drawn at a consistent anatomical level? (CPU, minutes)
+#   ROI=Heart sbatch jobs/superior_end_convention.job
+# Output: ${OUTPUT_DIR}/report.md, superior_end_per_case.csv, superior_end_vs_landmarks.png
+
+PROJECT_ROOT="${PROJECT_ROOT:-/home/shaohan/contour_qa_experiments}"
+ROI="${ROI:-Heart}"
+OUTPUT_DIR="${OUTPUT_DIR:-/scratch/shaohan/contour_QA/${ROI,,}_superior_convention_v1}"
+RAW_DATA_ROOT="${RAW_DATA_ROOT:-/home/shaohan/radformation-data/data}"
+
+cd "${PROJECT_ROOT}"
+source "${PROJECT_ROOT}/scripts/dino_shape/activate_3dino_env.sh"
+export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
+
+python -m analysis.superior_end_convention --roi "${ROI}" \
+  --raw-data-root "${RAW_DATA_ROOT}" --output-dir "${OUTPUT_DIR}" \
+  --workers "${SLURM_CPUS_PER_TASK:-8}"
