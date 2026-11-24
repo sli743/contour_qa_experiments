@@ -36,6 +36,18 @@ STAGE=train ROI=Heart bash scripts/dino_shape/submit_nsrqa_roi_pipeline.sh
 
 **Note:** the lungs started from a first-pass severity calibration instead. The fit config allows either starting point.
 
+**End-truncation guard**, the one addition to the lung method:
+- **Why:** truncation is a held-out error type. On Esophagus, about 1 in 5 fitted dropouts, and some noise draws (which keep only the largest piece), cut a whole end segment off: HD95 15–109 mm, against a real 95th percentile of 8 mm.
+- **What it does:** any draw that shortens the structure's top-to-bottom extent by more than the limit is redrawn, up to 8 times, then left clean.
+- **The limit:** the ROI's real 95th-percentile endpoint error (`max_abs_endpoint_error_mm`, at least 3 mm): about 6 mm for Esophagus, 21 mm for Heart.
+- **Where:** the guard lives in `training/corruptions/stochastic_region_dropout.redraw_if_truncated` and is used by both the fit (`forced_branch`) and training.
+- **Configs:** it is enabled by the fit config's `end_truncation_guard`, which stores `max_end_truncation_mm` in the fitted config. Configs without that key are unchanged.
+
+To refit an already prepared ROI (before training):
+```bash
+REFIT=1 STAGE=prep ROI=Esophagus bash scripts/dino_shape/submit_nsrqa_roi_pipeline.sh
+```
+
 `train` (GPU) runs, for each seed:
 1. Train and evaluate C1I1 and C0I0: on Month3 autoseg, on the clean approved contour, and C1I1 with the CT off.
 2. Per-seed scoring and depth calibration (`<roi>_ct_contour_nsrqa_v1/evaluations_floor_corrected/seed<S>*`).

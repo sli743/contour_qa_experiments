@@ -650,6 +650,45 @@ def stochastic_region_growth(
     }
 
 
+def end_truncation_mm(original: np.ndarray, result: np.ndarray, spacing_zyx: Sequence[float]) -> float:
+    """How far the corruption pulled the structure's S/I ends inward (mm, max of both ends).
+
+    Axis 0 is the slice (S/I) axis. Growth past an end does not count; only a
+    shortened extent does, i.e. an end segment that was cut off.
+    """
+    if not result.any():
+        return float("inf")
+    zo = np.flatnonzero(original.any(axis=(1, 2)))
+    zr = np.flatnonzero(result.any(axis=(1, 2)))
+    shrink_vox = max(int(zr[0]) - int(zo[0]), int(zo[-1]) - int(zr[-1]), 0)
+    return float(shrink_vox * float(spacing_zyx[0]))
+
+
+def redraw_if_truncated(draw, original: np.ndarray, spacing_zyx: Sequence[float],
+                        spec: Dict) -> Tuple[np.ndarray, Dict[str, object]]:
+    """Run ``draw()`` (one corruption draw), redrawing while it truncates an S/I end.
+
+    Truncation (cutting off an end segment) is a held-out out-of-family error. For
+    tubular ROIs the dropout and the noise (via keep_largest_component) can produce
+    it. ``spec['max_end_truncation_mm']`` (the ROI's real p95 endpoint error, set by
+    the severity fit) enables the guard; unset, ``draw`` runs once, bit-identical to before.
+    """
+    limit = spec.get("max_end_truncation_mm")
+    if limit is None:
+        return draw()
+    redraws = int(spec.get("end_truncation_max_redraws", 8))
+    meta: Dict[str, object] = {}
+    for i in range(redraws + 1):
+        result, meta = draw()
+        cut = end_truncation_mm(original, result, spacing_zyx)
+        if cut <= float(limit):
+            meta.update({"end_truncation_mm": cut, "end_truncation_redraws": i})
+            return result, meta
+    meta.update({"end_truncation_mm": cut, "end_truncation_redraws": redraws,
+                 "end_truncation_rejected_to_clean": 1})
+    return original.copy(), meta
+
+
 def stochastic_region_dropout_corruption(
     clean: torch.Tensor,
     cfg: Dict,
@@ -695,37 +734,41 @@ def stochastic_region_dropout_corruption(
                 break
 
     metadata: Dict[str, object] = {"branch": branch}
-    result = original.copy()
     branch_start = time.perf_counter()
-    if branch == "smooth_warp":
-        result, meta = smooth_random_warp_fast(result, spacing_zyx, spec.get("smooth_warp", {}), rng)
+
+    def draw() -> Tuple[np.ndarray, Dict[str, object]]:
+        m: Dict[str, object] = {}
+        if branch == "smooth_warp":
+            out, x = smooth_random_warp_fast(original.copy(), spacing_zyx, spec.get("smooth_warp", {}), rng)
+            m.update(x)
+        elif branch == "distance_noise":
+            out, x = signed_distance_noise(original.copy(), spacing_zyx, spec.get("distance_noise", {}), rng)
+            m.update(x)
+        elif branch == "combined":
+            out, x = smooth_random_warp_fast(original.copy(), spacing_zyx, spec.get("smooth_warp", {}), rng)
+            m.update(x)
+            out, x = signed_distance_noise(out, spacing_zyx, spec.get("distance_noise", {}), rng)
+            m.update(x)
+        elif branch == "stochastic_region_dropout":
+            out, x = stochastic_region_dropout(original, spacing_zyx, spec.get("dropout", {}), rng, cache_key=cache_key)
+            m.update(x)
+        elif branch == "global_boundary_offset":
+            out, x = global_signed_distance_offset(original, spacing_zyx, spec.get("global_boundary_offset", {}), rng)
+            m.update(x)
+        elif branch == "stochastic_region_growth":
+            out, x = stochastic_region_growth(original, spacing_zyx, spec.get("growth", {}), rng, cache_key=cache_key)
+            m.update(x)
+        else:  # clean
+            out = original.copy()
+        return out, m
+
+    if branch == "clean":
+        result = original.copy()
+    else:
+        result, meta = redraw_if_truncated(draw, original, spacing_zyx, spec)
         metadata.update(meta)
-    elif branch == "distance_noise":
-        result, meta = signed_distance_noise(result, spacing_zyx, spec.get("distance_noise", {}), rng)
-        metadata.update(meta)
-    elif branch == "combined":
-        result, meta = smooth_random_warp_fast(result, spacing_zyx, spec.get("smooth_warp", {}), rng)
-        metadata.update(meta)
-        result, meta = signed_distance_noise(result, spacing_zyx, spec.get("distance_noise", {}), rng)
-        metadata.update(meta)
-    elif branch == "stochastic_region_dropout":
-        result, meta = stochastic_region_dropout(original, spacing_zyx, spec.get("dropout", {}), rng, cache_key=cache_key)
-        metadata.update(meta)
-        if int(meta.get("dropout_rejected_to_clean", 0)):
-            metadata["requested_branch"] = branch
-            metadata["branch"] = "rejected_to_clean"
-    elif branch == "global_boundary_offset":
-        result, meta = global_signed_distance_offset(
-            original, spacing_zyx, spec.get("global_boundary_offset", {}), rng
-        )
-        metadata.update(meta)
-        if int(meta.get("global_boundary_offset_rejected_to_clean", 0)):
-            metadata["requested_branch"] = branch
-            metadata["branch"] = "rejected_to_clean"
-    elif branch == "stochastic_region_growth":
-        result, meta = stochastic_region_growth(original, spacing_zyx, spec.get("growth", {}), rng, cache_key=cache_key)
-        metadata.update(meta)
-        if int(meta.get("growth_rejected_to_clean", 0)):
+        if any(int(meta.get(k, 0)) for k in ("dropout_rejected_to_clean", "global_boundary_offset_rejected_to_clean",
+                                              "growth_rejected_to_clean", "end_truncation_rejected_to_clean")):
             metadata["requested_branch"] = branch
             metadata["branch"] = "rejected_to_clean"
     metadata["branch_corruption_seconds"] = time.perf_counter() - branch_start

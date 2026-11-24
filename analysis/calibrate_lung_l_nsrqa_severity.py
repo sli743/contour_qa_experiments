@@ -48,6 +48,7 @@ from analysis.spinalcord_diagnostic_utils import pair_metrics
 from training.corruptions.deformation_noise import signed_distance_noise
 from training.corruptions.stochastic_region_dropout import (
     global_signed_distance_offset,
+    redraw_if_truncated,
     smooth_random_warp_fast,
     stochastic_region_dropout,
     stochastic_region_dropout_corruption,
@@ -328,6 +329,19 @@ def pair_metrics_plus(clean: np.ndarray, corrupted: np.ndarray, spacing_zyx: Seq
 def forced_branch(clean: np.ndarray, spacing_zyx: Sequence[float], spec: Mapping, branch: str,
                   rng: random.Random, severity_values: Mapping[str, float] | None = None,
                   direction: str | None = None, cache_key: str | None = None) -> Tuple[np.ndarray, Dict]:
+    """One draw of ``branch``; redrawn while it truncates an S/I end when the spec's
+    ``max_end_truncation_mm`` is set (same guard as training)."""
+    original = clean.astype(bool, copy=False)
+    work, meta = redraw_if_truncated(
+        lambda: _forced_branch_once(original, spacing_zyx, spec, branch, rng, severity_values, direction, cache_key),
+        original, spacing_zyx, spec)
+    meta["branch"] = branch
+    return work, meta
+
+
+def _forced_branch_once(clean: np.ndarray, spacing_zyx: Sequence[float], spec: Mapping, branch: str,
+                        rng: random.Random, severity_values: Mapping[str, float] | None = None,
+                        direction: str | None = None, cache_key: str | None = None) -> Tuple[np.ndarray, Dict]:
     sev = dict(severity_values or {})
     work = clean.astype(bool, copy=True)
     meta: Dict[str, object] = {"branch": branch}

@@ -1071,6 +1071,21 @@ def main() -> None:
     if len(real_df) < int(cfg["objective"].get("minimum_real_cases", 12)):
         raise RuntimeError(f"Only {len(real_df)} real cases remain for calibration")
 
+    # Optional end-truncation guard (truncation is held out; tubular ROIs can produce it
+    # through dropout / noise). Limit = a quantile of the ROI's real S/I endpoint error,
+    # applied to every search, validation and training draw via the spec it is stored in.
+    guard = cfg.get("end_truncation_guard") or {}
+    if bool(guard.get("enabled", False)):
+        ends = pd.to_numeric(real_df["max_abs_endpoint_error_mm"], errors="coerce").dropna().to_numpy(float)
+        limit = max(float(np.quantile(ends, float(guard.get("quantile", 0.95)))), float(guard.get("min_mm", 3.0)))
+        srd = initial_cfg["stochastic_region_dropout"]
+        srd["max_end_truncation_mm"] = limit
+        srd["end_truncation_max_redraws"] = int(guard.get("max_redraws", 8))
+        initial_cfg.setdefault("study_metadata", {})["end_truncation_guard"] = {
+            "max_end_truncation_mm": limit, "quantile": float(guard.get("quantile", 0.95)),
+            "source": "max_abs_endpoint_error_mm, training cases"}
+        print(f"End-truncation guard: corruptions may not shorten the S/I extent by more than {limit:.2f} mm")
+
     component_path = error_root / "error_components.csv"
     if not component_path.is_file():
         raise FileNotFoundError(component_path)

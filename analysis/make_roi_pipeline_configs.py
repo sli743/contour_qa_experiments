@@ -15,6 +15,8 @@ Starting config of the fit: the ROI's month-temporal all-ROI NSR-QA config
 and training recipe as the Lung_L v3 fallback config, with the ROI's anatomy-profile
 severities; the fit's multiplier search starts from those. (The lungs started from a
 first-pass severity calibration instead; the fit config allows either.)
+The fit config also enables the end-truncation guard, the only addition to the lung
+method: draws that cut an S/I end segment off (held-out truncation) are redrawn.
 
 Prints shell assignments (GROUP, PROFILE, the profile's region-truth settings and
 config paths) for the driver script to eval.
@@ -87,6 +89,10 @@ def main() -> None:
                 "initial_training_config": str(start), "fallback_training_config": str(start),
                 "error_field_root": str(ef_dir)})
     fit["data"] = {"train_label_dir": data["train_label_dir"], "train_ct_dir": data["train_ct_dir"]}
+    # Truncation is a held-out error type; on tubular ROIs dropout / noise can cut an
+    # end segment off. Reject draws that shorten the S/I extent by more than the ROI's
+    # real p95 endpoint error (no effect where corruptions never do that).
+    fit["end_truncation_guard"] = {"enabled": True, "quantile": 0.95, "min_mm": 3.0, "max_redraws": 8}
     fit["output"] = {"directory": str(fit_dir),
                      "recommended_experiment_name": f"dino_shape_stochastic_region_dropout_{roi}_metric_fit_{args.fit_suffix}"}
     fit_path = fit_dir / "config.yaml"

@@ -14,6 +14,10 @@ set -euo pipefail
 #     5. contour-only study prepare (configs, Month3 crops) -> <roi>_nsrqa_month_temporal_family_validated_v1
 #   CHECK before stage 2: the audit report (how much of the ROI the crop cuts off),
 #   the fit report and its example bank (do the corruptions look plausible?).
+#   The fit enables the end-truncation guard (draws that cut an S/I end segment off are
+#   redrawn; limit = the ROI's real p95 endpoint error). Existing audit / error fields
+#   are reused. REFIT=1 redoes fit + prepare of an already prepared ROI (before any
+#   training), keeping the previous fit and contour study as *_prev_<date>.
 #
 #   STAGE=train ROI=Heart bash scripts/dino_shape/submit_nsrqa_roi_pipeline.sh
 #     C1I1 + C0I0 (+ ct_only with WITH_CT_ONLY=1) x seeds, Month3 / approved / CT-absent
@@ -45,24 +49,42 @@ eval "${CFG_VARS}"
 echo "${ROI}: group ${GROUP}, profile ${PROFILE}; truth depth ${TRUTH_T} mm, region core >= ${MIN_REGION_ML} mL, positive >= ${POSITIVE_ML} mL; score depths ${DEPTHS}"
 
 if [[ "${STAGE}" == "prep" ]]; then
-  if [[ -s "${V3_STUDY}/experiment_metadata.json" && "${ALLOW_EXISTING:-0}" != "1" ]]; then
-    echo "ERROR: ${V3_STUDY} is already prepared (ALLOW_EXISTING=1 to redo)." >&2; exit 2
+  if [[ -s "${V3_STUDY}/experiment_metadata.json" ]]; then
+    [[ "${REFIT:-0}" == "1" ]] || { echo "ERROR: ${V3_STUDY} is already prepared (REFIT=1 redoes the fit + prepare)." >&2; exit 2; }
+    [[ -e "${CT_STUDY}/models" ]] && { echo "ERROR: ${CT_STUDY} already has models; refitting would mismatch them." >&2; exit 2; }
+    # Keep the previous fit and contour study for comparison, then regenerate the configs.
+    STAMP="prev_$(date +%Y%m%d_%H%M)"
+    mv "${FIT_DIR}" "${FIT_DIR}_${STAMP}"
+    mv "${V3_STUDY}" "${V3_STUDY}_${STAMP}"
+    echo "Moved the previous fit and contour study to *_${STAMP}"
+    CFG_VARS="$(python -m analysis.make_roi_pipeline_configs --roi "${ROI}" --scratch "${SCRATCH}" --temporal-study "${TEMPORAL_STUDY}")"
+    eval "${CFG_VARS}"
   fi
   mkdir -p "${AUDIT_DIR}" "${V3_STUDY}/logs"
 
-  AUDIT="$(jobid "$(sbatch --parsable -p hugo --account=geoffrey_hugo --job-name="${TAG}_fov_audit" \
-    --export="ALL,PROJECT_ROOT=${PROJECT_ROOT},ROI=${ROI},GROUP=${GROUP},CONFIG=${START_CONFIG},OUTPUT_DIR=${AUDIT_DIR},RAW_DATA_ROOT=${RAW_DATA_ROOT}" \
-    --output="${AUDIT_DIR}/slurm-%x-%j.out" --error="${AUDIT_DIR}/slurm-%x-%j.err" \
-    jobs/lung_l_fov_clipping_audit.job)")"
-
-  EF="$(jobid "$(sbatch --parsable -p hugo --account=geoffrey_hugo --job-name="${TAG}_errfield" \
-    --export="ALL,PROJECT_ROOT=${PROJECT_ROOT},CONFIG=${EF_CONFIG}" \
-    --output="${EF_DIR}/slurm-%x-%j.out" --error="${EF_DIR}/slurm-%x-%j.err" \
-    jobs/lung_l_error_field_characterization.job)")"
+  # Crop audit and error fields do not depend on the fit: reuse them if present.
+  if [[ -s "${AUDIT_DIR}/${ROI}_fov_clipping_audit.md" ]]; then
+    AUDIT="reused"
+  else
+    AUDIT="$(jobid "$(sbatch --parsable -p hugo --account=geoffrey_hugo --job-name="${TAG}_fov_audit" \
+      --export="ALL,PROJECT_ROOT=${PROJECT_ROOT},ROI=${ROI},GROUP=${GROUP},CONFIG=${START_CONFIG},OUTPUT_DIR=${AUDIT_DIR},RAW_DATA_ROOT=${RAW_DATA_ROOT}" \
+      --output="${AUDIT_DIR}/slurm-%x-%j.out" --error="${AUDIT_DIR}/slurm-%x-%j.err" \
+      jobs/lung_l_fov_clipping_audit.job)")"
+  fi
+  FIT_DEP=()
+  if [[ -s "${EF_DIR}/case_error_field_summary.csv" && -s "${EF_DIR}/error_components.csv" ]]; then
+    EF="reused"
+  else
+    EF="$(jobid "$(sbatch --parsable -p hugo --account=geoffrey_hugo --job-name="${TAG}_errfield" \
+      --export="ALL,PROJECT_ROOT=${PROJECT_ROOT},CONFIG=${EF_CONFIG}" \
+      --output="${EF_DIR}/slurm-%x-%j.out" --error="${EF_DIR}/slurm-%x-%j.err" \
+      jobs/lung_l_error_field_characterization.job)")"
+    FIT_DEP=(--dependency="afterok:${EF}")
+  fi
 
   # The fit exits 0 even when the dropout no-op audit fails and always writes the best candidate.
   FIT="$(jobid "$(sbatch --parsable -p hugo --account=geoffrey_hugo --job-name="${TAG}_sevfit" \
-    --dependency="afterok:${EF}" \
+    ${FIT_DEP[@]+"${FIT_DEP[@]}"} \
     --export="ALL,REPO=${PROJECT_ROOT},CONFIG=${FIT_CONFIG}" \
     --output="${FIT_DIR}/slurm-%x-%j.out" --error="${FIT_DIR}/slurm-%x-%j.err" \
     jobs/lung_l_nsrqa_synthetic_severity_fit_family_validated.job)")"
