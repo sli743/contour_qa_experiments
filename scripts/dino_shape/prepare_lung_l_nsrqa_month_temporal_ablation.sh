@@ -5,6 +5,8 @@ set -euo pipefail
 # same two-arm month-temporal ablation for another lungs_chest ROI.
 PROJECT_ROOT="${PROJECT_ROOT:-/home/shaohan/contour_qa_experiments}"
 ROI="${ROI:-Lung_L}"
+GROUP="${GROUP:-lungs_chest}"   # crop group of ROI (configs/dino_shape/all_roi_nsrqa_registry.yaml)
+MIN_MONTH3="${MIN_MONTH3:-40}"  # sanity floor on Month3 labels (shows the temporal remap was used)
 STUDY_ROOT="${STUDY_ROOT:-/scratch/shaohan/contour_QA/lung_l_nsrqa_corruption_ablation_month_temporal_v1}"
 TEMPORAL_STUDY_ROOT="${TEMPORAL_STUDY_ROOT:-/scratch/shaohan/contour_QA/all_roi_NSRQA_month_temporal_study}"
 SPLIT_CONFIG="${SPLIT_CONFIG:-${PROJECT_ROOT}/configs/dino_shape/month_temporal_nsrqa_split.yaml}"
@@ -47,13 +49,13 @@ REFERENCE_CONFIG="${STUDY_ROOT}/configs/nsrqa_corruption_seed${SEED}.yaml"
 python -m evaluation.actual_autoseg.preprocess_actual_autoseg \
   --config "${REFERENCE_CONFIG}" \
   --roi "${ROI}" \
-  --group lungs_chest \
+  --group "${GROUP}" \
   --raw-data-root "${RAW_DATA_ROOT}" \
   --output-root "${STUDY_ROOT}/actual_autoseg_preprocessed" \
   --mode autoseg_centered \
   --splits testing1
 
-python - "${STUDY_ROOT}" "${REFERENCE_CONFIG}" "${ROI}" <<'PY'
+python - "${STUDY_ROOT}" "${REFERENCE_CONFIG}" "${ROI}" "${MIN_MONTH3}" <<'PY'
 import csv
 import json
 import sys
@@ -71,7 +73,7 @@ with manifest.open(newline="", encoding="utf-8") as f:
 test_rows = [r for r in rows if r.get("split") == "testing1" and r.get("localization_mode") == "autoseg_centered"]
 ok = [r for r in test_rows if r.get("status") == "ok"]
 skipped = [r for r in test_rows if r.get("status") != "ok"]
-if expected < 40:
+if expected < int(sys.argv[4]):
     raise SystemExit(f"ERROR: only {expected} {roi} testing1 labels; temporal Month3 remap was not used")
 if not ok:
     raise SystemExit(f"ERROR: no Month3 {roi} actual-autoseg cases were successfully preprocessed")

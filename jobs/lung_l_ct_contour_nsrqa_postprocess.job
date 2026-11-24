@@ -23,6 +23,11 @@ fi
 WATCH_ARGS=()
 [[ -n "${WATCH}" ]] && WATCH_ARGS=(--watch "${WATCH}")
 SEED="${SEED:-91}"
+# DESIGN=full: the 2x2 corruption x CT ablation + ct_only (Lung_L/Lung_R).
+# DESIGN=core: the generic pipeline, C1I1 (+ CT-absent) vs C0I0, plus ct_only if trained.
+DESIGN="${DESIGN:-full}"
+DEPTHS="${DEPTHS:-3,4.5,5.25,6,7.5}"
+MIN_COMPONENT_ML="${MIN_COMPONENT_ML:-0.05}"
 cd "${PROJECT_ROOT}"
 source "${PROJECT_ROOT}/scripts/dino_shape/activate_3dino_env.sh"
 export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
@@ -41,12 +46,16 @@ link_seed() {  # link_seed <arm name in EV> <source arm dir>
   mkdir -p "${dst}"
   ln -sfn "${src}/seed${SEED}" "${dst}/seed${SEED}"
 }
-link_seed contour_only_v3 "${V3_STUDY}/evaluations/nsrqa_corruption"
 link_seed contour_only_no_corruption "${NOCORR_STUDY}/evaluations/no_corruption"
-
-ARMS=(ct_contour_corruption ct_contour_no_corruption ct_only_segmenter
-      ct_contour_corruption_ct_absent ct_contour_no_corruption_ct_absent
-      contour_only_v3 contour_only_no_corruption)
+if [[ "${DESIGN}" == "full" ]]; then
+  link_seed contour_only_v3 "${V3_STUDY}/evaluations/nsrqa_corruption"
+  ARMS=(ct_contour_corruption ct_contour_no_corruption ct_only_segmenter
+        ct_contour_corruption_ct_absent ct_contour_no_corruption_ct_absent
+        contour_only_v3 contour_only_no_corruption)
+else
+  ARMS=(ct_contour_corruption ct_contour_corruption_ct_absent contour_only_no_corruption)
+  [[ -d "${EV}/ct_only_segmenter/seed${SEED}/actual_autoseg_cases" ]] && ARMS+=(ct_only_segmenter)
+fi
 for arm in "${ARMS[@]}"; do
   [[ -d "${EV}/${arm}/seed${SEED}/actual_autoseg_cases" ]] || { echo "Missing evaluation: ${EV}/${arm}" >&2; exit 1; }
 done
@@ -57,7 +66,7 @@ python -m analysis.score_nsrqa_floor_corrected \
   --reference-arm contour_only_no_corruption \
   --seed "${SEED}" \
   --roi "${ROI}" ${WATCH_ARGS[@]+"${WATCH_ARGS[@]}"} \
-  --depth-thresholds 3,4.5,5.25,6,7.5 \
+  --depth-thresholds "${DEPTHS}" --min-component-ml "${MIN_COMPONENT_ML}" \
   --output-dir "${STUDY_ROOT}/evaluations_floor_corrected/seed${SEED}"
 
 # Per-arm depth-threshold calibration (label-free clean-floor rule + supervised check).
@@ -65,13 +74,14 @@ python -m analysis.calibrate_nsrqa_depth_threshold \
   --eval-root "${EV}" \
   --arms "${ARMS[@]}" \
   --seed "${SEED}" \
-  --roi "${ROI}" ${WATCH_ARGS[@]+"${WATCH_ARGS[@]}"} \
+  --roi "${ROI}" ${WATCH_ARGS[@]+"${WATCH_ARGS[@]}"} --min-component-ml "${MIN_COMPONENT_ML}" \
   --output-dir "${STUDY_ROOT}/evaluations_floor_corrected/seed${SEED}_depth_sweep"
 
 # 2x2 corruption x CT ablation for this seed (aggregate seeds with
-# analysis.ablation_corruption_ct_seeds once all seeds are done).
-python -m analysis.ablation_corruption_ct   --cell C0I0="${EV}/contour_only_no_corruption"   --cell C1I0="${EV}/contour_only_v3"   --cell C0I1="${EV}/ct_contour_no_corruption"   --cell C1I1="${EV}/ct_contour_corruption"   --extra C1I1_ct_absent="${EV}/ct_contour_corruption_ct_absent@C1I1"   --extra C0I1_ct_absent="${EV}/ct_contour_no_corruption_ct_absent@C0I1"   --extra ct_only="${EV}/ct_only_segmenter"   --combine rankavg_C1I1_ctonly=C1I1+ct_only   --seed "${SEED}" --roi "${ROI}" ${WATCH_ARGS[@]+"${WATCH_ARGS[@]}"}   --output-dir "${STUDY_ROOT}/evaluations_floor_corrected/seed${SEED}_ablation"
-python -m analysis.plot_ablation_corruption_ct   --ablation-dir "${STUDY_ROOT}/evaluations_floor_corrected/seed${SEED}_ablation"
+# analysis.ablation_corruption_ct_seeds once all seeds are done). The core design
+# has no 2x2; its comparison is region detection (jobs/nsrqa_region_detection.job).
+[[ "${DESIGN}" == "full" ]] && python -m analysis.ablation_corruption_ct  --cell C0I0="${EV}/contour_only_no_corruption"   --cell C1I0="${EV}/contour_only_v3"   --cell C0I1="${EV}/ct_contour_no_corruption"   --cell C1I1="${EV}/ct_contour_corruption"   --extra C1I1_ct_absent="${EV}/ct_contour_corruption_ct_absent@C1I1"   --extra C0I1_ct_absent="${EV}/ct_contour_no_corruption_ct_absent@C0I1"   --extra ct_only="${EV}/ct_only_segmenter"   --combine rankavg_C1I1_ctonly=C1I1+ct_only   --seed "${SEED}" --roi "${ROI}" ${WATCH_ARGS[@]+"${WATCH_ARGS[@]}"}   --output-dir "${STUDY_ROOT}/evaluations_floor_corrected/seed${SEED}_ablation"
+[[ "${DESIGN}" == "full" ]] && python -m analysis.plot_ablation_corruption_ct   --ablation-dir "${STUDY_ROOT}/evaluations_floor_corrected/seed${SEED}_ablation"
 
 # Gate / CT-injection trajectory per CT arm, for quick inspection.
 for f in "${STUDY_ROOT}"/models/*/*seed${SEED}/logs/image_guidance.csv; do

@@ -43,7 +43,7 @@ fi
 python -m analysis.audit_lung_fov_clipping \
   --config "${CONFIG}" \
   --roi "${ROI}" \
-  --group lungs_chest \
+  --group "${GROUP:-lungs_chest}" \
   --raw-data-root "${RAW_DATA_ROOT}" \
   --output-dir "${OUTPUT_DIR}" \
   --splits training1 validation1 testing1 \
