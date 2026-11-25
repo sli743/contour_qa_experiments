@@ -1,0 +1,23 @@
+#!/bin/bash
+#SBATCH --job-name=roi_census
+#SBATCH -p hugo
+#SBATCH --account=geoffrey_hugo
+#SBATCH --cpus-per-task=8
+#SBATCH --mem=32G
+#SBATCH --time=02:00:00
+
+set -euo pipefail
+
+# Month3 truth census per ROI (CPU, minutes): positives, missing/extra, segment-scale share.
+#   sbatch jobs/roi_truth_census.job            (optional: ROIS="Liver A_Aorta")
+# Output: ${OUTPUT_DIR}/report.md, census.csv, regions.csv, patients.csv
+
+PROJECT_ROOT="${PROJECT_ROOT:-/home/shaohan/contour_qa_experiments}"
+OUTPUT_DIR="${OUTPUT_DIR:-/scratch/shaohan/contour_QA/roi_truth_census_v1}"
+
+cd "${PROJECT_ROOT}"
+source "${PROJECT_ROOT}/scripts/dino_shape/activate_3dino_env.sh"
+export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
+
+python -m analysis.roi_truth_census --output-dir "${OUTPUT_DIR}" \
+  --workers "${SLURM_CPUS_PER_TASK:-8}" ${ROIS:+--rois ${ROIS}}
